@@ -93,6 +93,9 @@ Creates `exports/<timestamp>/` with all table exports plus:
 The workflow at `.github/workflows/build-binaries.yml` builds one-file binaries:
 - `tpa-analyzer` (macOS)
 - `tpa-analyzer.exe` (Windows)
+- Uses platform-specific icons:
+  - `assets/tpa-analyzer-icon.icns` (macOS)
+  - `assets/tpa-analyzer-icon.ico` (Windows)
 
 Steps:
 1. Push this repository to GitHub.
