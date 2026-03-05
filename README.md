@@ -90,20 +90,20 @@ Creates `exports/<timestamp>/` with all table exports plus:
 
 ## Build macOS + Windows executables (GitHub Actions)
 
-The workflow at `.github/workflows/build-binaries.yml` builds one-file binaries:
-- `tpa-analyzer` (macOS)
+The workflow at `.github/workflows/build-binaries.yml` produces:
+- `tpa-analyzer-macos-app.zip` containing `TPA Analyzer.app` (macOS)
 - `tpa-analyzer.exe` (Windows)
-- Uses platform-specific icons:
-  - `assets/tpa-analyzer-icon.icns` (macOS)
-  - `assets/tpa-analyzer-icon.ico` (Windows)
+- Uses platform-specific icons from `assets/`:
+  - `tpa-analyzer-icon.icns` for the macOS app bundle
+  - `tpa-analyzer-icon.ico` for the Windows executable
 
 Steps:
 1. Push this repository to GitHub.
 2. Open **Actions** -> **Build Binaries**.
 3. Click **Run workflow** (or push a tag like `v1.0.0`).
 4. Download artifacts:
-   - `tpa-analyzer-macOS`
-   - `tpa-analyzer-Windows`
+   - `tpa-analyzer-macOS` (contains `tpa-analyzer-macos-app.zip` -> `TPA Analyzer.app`)
+   - `tpa-analyzer-Windows` (contains `tpa-analyzer.exe`)
 
 Troubleshooting:
 - If a binary fails with `ModuleNotFoundError` for `textual.*` modules, rebuild with the current workflow (it includes `--collect-submodules textual --collect-data textual`).

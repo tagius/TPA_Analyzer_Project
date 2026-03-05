@@ -47,8 +47,54 @@ jobs:
       - name: Prepare macOS artifact
         if: runner.os == 'macOS'
         run: |
-          mkdir -p release
-          cp dist/tpa-analyzer release/tpa-analyzer
+          APP_NAME="TPA Analyzer.app"
+          APP_DIR="release/${APP_NAME}"
+
+          mkdir -p "${APP_DIR}/Contents/MacOS"
+          mkdir -p "${APP_DIR}/Contents/Resources"
+
+          cp dist/tpa-analyzer "${APP_DIR}/Contents/MacOS/tpa-analyzer"
+          chmod +x "${APP_DIR}/Contents/MacOS/tpa-analyzer"
+          cp assets/tpa-analyzer-icon.icns "${APP_DIR}/Contents/Resources/AppIcon.icns"
+
+          cat > "${APP_DIR}/Contents/MacOS/launcher" <<'SH'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          osascript -e "tell application \"Terminal\" to activate" -e "tell application \"Terminal\" to do script quoted form of POSIX path of \"$DIR/tpa-analyzer\""
+          SH
+          chmod +x "${APP_DIR}/Contents/MacOS/launcher"
+
+          cat > "${APP_DIR}/Contents/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key>
+            <string>TPA Analyzer</string>
+            <key>CFBundleDisplayName</key>
+            <string>TPA Analyzer</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.tpa.analyzer</string>
+            <key>CFBundleVersion</key>
+            <string>1.0.0</string>
+            <key>CFBundleShortVersionString</key>
+            <string>1.0.0</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleExecutable</key>
+            <string>launcher</string>
+            <key>CFBundleIconFile</key>
+            <string>AppIcon</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>11.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+
+          ditto -c -k --sequesterRsrc --keepParent "${APP_DIR}" "release/tpa-analyzer-macos-app.zip"
+          rm -rf "${APP_DIR}"
 
       - name: Prepare Windows artifact
         if: runner.os == 'Windows'
