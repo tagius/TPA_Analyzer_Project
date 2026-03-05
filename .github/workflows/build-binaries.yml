@@ -31,7 +31,7 @@ jobs:
 
       - name: Build one-file executable
         run: |
-          python -m PyInstaller --noconfirm --onefile --name tpa-analyzer app.py
+          python -m PyInstaller --noconfirm --onefile --name tpa-analyzer --collect-submodules textual --collect-data textual app.py
 
       - name: Prepare macOS artifact
         if: runner.os == 'macOS'

@@ -21,3 +21,6 @@ How to run:
 4. Download artifacts:
    - `tpa-analyzer-macOS`
    - `tpa-analyzer-Windows`
+
+Troubleshooting:
+- If a downloaded binary crashes with `ModuleNotFoundError` for a `textual.*` module (for example `textual.widgets._tab_pane`), rebuild using the latest workflow. The build command now includes `--collect-submodules textual --collect-data textual` to package Textual's lazy-loaded modules.
