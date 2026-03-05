@@ -31,6 +31,21 @@ def _pair_key(a: str, b: str) -> tuple[str, str]:
     return (a, b) if a <= b else (b, a)
 
 
+def _row_float(row: pd.Series, keys: list[str], default: float = np.nan) -> float:
+    """Return the first finite float found for one of the candidate column names."""
+    for key in keys:
+        if key not in row.index:
+            continue
+        value = row[key]
+        if pd.isna(value):
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return float(default)
+
+
 def _choose_parametric(
     grouped: dict[str, np.ndarray],
     alpha: float,
@@ -235,7 +250,7 @@ def run_statistics(
             for _, row in posthoc.iterrows():
                 group_a = str(row["A"])
                 group_b = str(row["B"])
-                p_adj = float(row.get("p-tukey", row.get("pval", np.nan)))
+                p_adj = _row_float(row, ["p_tukey", "p-tukey", "pval"])
                 is_significant = bool(np.isfinite(p_adj) and p_adj < alpha)
                 if is_significant:
                     significant_pairs.add(_pair_key(group_a, group_b))
@@ -246,7 +261,7 @@ def run_statistics(
                         "Group1": group_a,
                         "Group2": group_b,
                         "Test": "Tukey HSD",
-                        "Statistic": float(row.get("T", np.nan)),
+                        "Statistic": _row_float(row, ["T", "t"]),
                         "P_raw": p_adj,
                         "P_adj": p_adj,
                         "Significant": is_significant,
@@ -267,8 +282,8 @@ def run_statistics(
             for _, row in posthoc.iterrows():
                 group_a = str(row["A"])
                 group_b = str(row["B"])
-                p_raw = float(row.get("p-unc", np.nan))
-                p_adj = float(row.get("p-corr", p_raw))
+                p_raw = _row_float(row, ["p_unc", "p-unc"])
+                p_adj = _row_float(row, ["p_corr", "p-corr"], default=p_raw)
                 is_significant = bool(np.isfinite(p_adj) and p_adj < alpha)
                 if is_significant:
                     significant_pairs.add(_pair_key(group_a, group_b))
@@ -279,7 +294,7 @@ def run_statistics(
                         "Group1": group_a,
                         "Group2": group_b,
                         "Test": "Dunn (BH)",
-                        "Statistic": float(row.get("U-val", np.nan)),
+                        "Statistic": _row_float(row, ["U_val", "U-val"]),
                         "P_raw": p_raw,
                         "P_adj": p_adj,
                         "Significant": is_significant,

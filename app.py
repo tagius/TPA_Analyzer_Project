@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime
+import json
 from pathlib import Path
 import re
 from typing import Any
@@ -28,7 +29,17 @@ from textual.widgets import (
 
 from stats_engine import run_statistics
 from tpa_engine import TPAConfig, calculate_tpa, infer_group_from_filename, parse_zwick_data
-from viz_engine import FigureConfig, GraphSpec, PlotStyleConfig, VARIABLE_REGISTRY, plot_custom_graphs, plot_grouped_metrics, plot_overlay_traces, plot_trace_stack
+from viz_engine import (
+    FigureConfig,
+    GraphSpec,
+    PlotStyleConfig,
+    VARIABLE_REGISTRY,
+    export_qc_report,
+    plot_custom_graphs,
+    plot_grouped_metrics,
+    plot_overlay_traces,
+    plot_trace_stack,
+)
 
 
 def _is_hex_color(value: str) -> bool:
@@ -72,7 +83,25 @@ PARAM_INFO: dict[str, dict[str, str]] = {
         "label": "Stats Mode",
         "help": "Select statistical test family. Auto chooses parametric or nonparametric based on assumptions.",
     },
+    "metric_equations": {
+        "label": "TPA Metric Equations",
+        "help": (
+            "Hardness = max force at first compression peak (F1).\n\n"
+            "Cohesiveness = A2 / A1\n"
+            "A1 and A2 are positive force-time areas under first and second compressions.\n\n"
+            "Springiness = (t_peak2 - t_start2) / (t_peak1 - t_start1)\n\n"
+            "Resilience = A1_down / A1_up\n"
+            "A1_up is first-cycle loading area; A1_down is unloading area.\n\n"
+            "Chewiness = Hardness x Cohesiveness x Springiness\n\n"
+            "Adhesiveness = integral of negative force between cycles.\n\n"
+            "True strain (%) = ((deformation - deformation_at_start1) / sample_height) x 100\n"
+            "True stress (kPa) = (force / contact_area) x 1000\n"
+            "Modulus (kPa) = slope from linear fit of stress vs strain in selected strain window."
+        ),
+    },
 }
+
+SESSION_FILE_NAME = ".tpa_analyzer_session.json"
 
 
 class ParameterInfoModal(ModalScreen[None]):
@@ -90,13 +119,13 @@ class ParameterInfoModal(ModalScreen[None]):
         width: 72;
         max-width: 96%;
         height: auto;
-        border: round #64748B;
-        background: #FFFFFF;
+        border: round $border;
+        background: $panel;
         padding: 1 2;
     }
     #param-help-title {
         text-style: bold;
-        color: #2563EB;
+        color: $primary;
         margin-bottom: 1;
     }
     #param-help-body {
@@ -124,8 +153,8 @@ class TPAAnalyzerApp(App):
 
     CSS = """
     Screen {
-        background: #F4F6F8;
-        color: #0F172A;
+        background: $surface;
+        color: $foreground;
     }
 
     #studio {
@@ -133,8 +162,8 @@ class TPAAnalyzerApp(App):
     }
 
     .pane {
-        border: round #CBD5E1;
-        background: #FFFFFF;
+        border: round $border;
+        background: $panel;
         padding: 1;
         margin: 1;
     }
@@ -156,12 +185,12 @@ class TPAAnalyzerApp(App):
 
     .section-title {
         text-style: bold;
-        color: #2563EB;
+        color: $primary;
         margin-bottom: 1;
     }
 
     .small-label {
-        color: #64748B;
+        color: $foreground 60%;
     }
 
     .param-row {
@@ -176,33 +205,34 @@ class TPAAnalyzerApp(App):
         height: 1;
         margin-left: 1;
         padding: 0;
-        background: #EEF2FF;
-        color: #1D4ED8;
-        border: round #BFDBFE;
+        background: $surface;
+        color: $primary;
+        border: round $primary 40%;
         text-style: bold;
     }
 
     #file_list {
         height: 1fr;
-        border: round #CBD5E1;
+        border: round $border;
         margin-bottom: 1;
         min-height: 8;
     }
 
     #group_order_list {
         height: 6;
-        border: round #CBD5E1;
+        border: round $border;
         margin-bottom: 1;
     }
 
     DataTable {
         height: 1fr;
         margin-bottom: 1;
+        border: round $border;
     }
 
     RichLog {
         height: 10;
-        border: round #CBD5E1;
+        border: round $border;
     }
 
     .action-row {
@@ -215,12 +245,12 @@ class TPAAnalyzerApp(App):
     }
 
     #status-msg {
-        color: #64748B;
+        color: $foreground 60%;
         margin-top: 1;
     }
 
     #graph-spec-list {
-        border: round #CBD5E1;
+        border: round $border;
         padding: 1;
         height: 8;
         overflow-y: auto;
@@ -236,6 +266,9 @@ class TPAAnalyzerApp(App):
     def __init__(self):
         super().__init__()
         self.base_dir = Path.cwd()
+        self.active_directory: Path | None = None
+        self._loading_session: bool = False
+        self._pending_color_group: str | None = None
         self.file_records: list[dict[str, str]] = []
         self.selected_file_index: int | None = None
         self.group_order: list[str] = []
@@ -243,6 +276,7 @@ class TPAAnalyzerApp(App):
 
         self.metrics_df = pd.DataFrame()
         self.trace_df = pd.DataFrame()
+        self.qc_df = pd.DataFrame()
         self.stats_results: dict[str, dict[str, Any]] = {}
 
         self.plot_style = PlotStyleConfig()
@@ -260,7 +294,12 @@ class TPAAnalyzerApp(App):
                 yield Button("Refresh Directory", id="btn_refresh", variant="primary")
 
                 yield Label("Detected Files", classes="small-label")
-                yield OptionList(id="file_list", markup=False)
+                yield DataTable(
+                    id="file_list",
+                    cursor_type="row",
+                    show_row_labels=False,
+                    zebra_stripes=False,
+                )
                 yield Static("Selected: none", id="selected_file_info", classes="small-label")
                 yield Static("Groups: none", id="group_summary", classes="small-label")
                 yield Label("Group Display Order", classes="small-label")
@@ -350,6 +389,9 @@ class TPAAnalyzerApp(App):
                             id="select_stats_mode",
                             allow_blank=False,
                         )
+                        with Horizontal(classes="param-row"):
+                            yield Label("Metric Equations", classes="small-label")
+                            yield Button("?", id="info_metric_equations", classes="info-btn", tooltip=PARAM_INFO["metric_equations"]["help"])
                         yield Button("Run Analysis", id="btn_analyze", variant="primary")
 
                     with TabPane("Plot Builder"):
@@ -436,6 +478,9 @@ class TPAAnalyzerApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        file_table = self.query_one("#file_list", DataTable)
+        file_table.add_columns("#", "Group", "Filename")
+
         table = self.query_one("#results_table", DataTable)
         table.add_columns(
             "Filename",
@@ -482,10 +527,201 @@ class TPAAnalyzerApp(App):
             path = (self.base_dir / path).resolve()
         return path
 
+    def _session_path(self, directory: Path) -> Path:
+        return directory / SESSION_FILE_NAME
+
+    def _set_input_if_present(self, widget_id: str, value: str) -> None:
+        try:
+            self.query_one(widget_id, Input).value = value
+        except Exception:
+            pass
+
+    def _set_select_if_present(self, widget_id: str, value: str) -> None:
+        try:
+            self.query_one(widget_id, Select).value = value
+        except Exception:
+            pass
+
+    def watch_theme(self, theme_name: str) -> None:
+        _ = theme_name
+        if not self.is_mounted or self._loading_session:
+            return
+        self._autosave_session()
+
+    def _collect_session_payload(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "saved_at_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "directory": str(self.active_directory) if self.active_directory else "",
+            "file_records": [
+                {"filename": record.get("filename", ""), "group": record.get("group", "")}
+                for record in self.file_records
+            ],
+            "group_order": self.group_order.copy(),
+            "selected_file_index": self.selected_file_index,
+            "ui": {
+                "theme": str(self.theme),
+            },
+            "analysis_params": {
+                "sample_height": self.query_one("#input_height", Input).value,
+                "contact_area": self.query_one("#input_area", Input).value,
+                "baseline_points": self.query_one("#input_baseline_points", Input).value,
+                "trigger_force": self.query_one("#input_trigger", Input).value,
+                "peak_prominence": self.query_one("#input_prominence", Input).value,
+                "peak_distance": self.query_one("#input_peak_distance", Input).value,
+                "modulus_min": self.query_one("#input_mod_min", Input).value,
+                "modulus_max": self.query_one("#input_mod_max", Input).value,
+                "stats_mode": str(self.query_one("#select_stats_mode", Select).value),
+            },
+            "plot_builder": {
+                "x_var": str(self.query_one("#select_x_var", Select).value),
+                "y_vars": self.query_one("#input_y_vars", Input).value,
+                "graph_mode": str(self.query_one("#select_graph_mode", Select).value),
+                "curve_mode": str(self.query_one("#select_curve_mode", Select).value),
+                "band_mode": str(self.query_one("#select_band_mode", Select).value),
+                "graph_title": self.query_one("#input_graph_title", Input).value,
+                "overlay_mode": str(self.query_one("#select_overlay_mode", Select).value),
+            },
+            "figure_style": {
+                "ratio": str(self.query_one("#select_ratio", Select).value),
+                "width_in": self.query_one("#input_width", Input).value,
+                "height_in": self.query_one("#input_height_fig", Input).value,
+                "dpi": self.query_one("#input_dpi", Input).value,
+            },
+            "colors": {
+                "group_force_colors": self.plot_style.group_force_colors.copy(),
+                "group_deformation_colors": self.plot_style.group_deformation_colors.copy(),
+                "group_stress_colors": self.plot_style.group_stress_colors.copy(),
+                "selected_color_group": str(self.query_one("#select_color_group", Select).value),
+                "force_hex_input": self.query_one("#input_force_hex", Input).value,
+                "defo_hex_input": self.query_one("#input_defo_hex", Input).value,
+                "stress_hex_input": self.query_one("#input_stress_hex", Input).value,
+            },
+            "graph_specs": [asdict(spec) for spec in self.graph_specs],
+        }
+
+    def _autosave_session(self) -> None:
+        if self._loading_session or self.active_directory is None:
+            return
+        try:
+            payload = self._collect_session_payload()
+            path = self._session_path(self.active_directory)
+            path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception as exc:
+            self._log(f"Session autosave failed: {exc}")
+
+    def _load_session_for_directory(self, directory: Path) -> tuple[bool, int | None]:
+        path = self._session_path(directory)
+        if not path.exists() or not path.is_file():
+            return False, None
+
+        selected_idx: int | None = None
+        self._loading_session = True
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return False, None
+
+            ui = data.get("ui", {})
+            if isinstance(ui, dict):
+                saved_theme = str(ui.get("theme", "")).strip()
+                if saved_theme and self.get_theme(saved_theme) is not None:
+                    self.theme = saved_theme
+
+            files_data = data.get("file_records", [])
+            group_map: dict[str, str] = {}
+            if isinstance(files_data, list):
+                for item in files_data:
+                    if not isinstance(item, dict):
+                        continue
+                    filename = str(item.get("filename", "")).strip()
+                    group = str(item.get("group", "")).strip()
+                    if filename:
+                        group_map[filename] = group
+            for record in self.file_records:
+                mapped_group = group_map.get(record.get("filename", ""))
+                if mapped_group:
+                    record["group"] = mapped_group
+
+            saved_order = data.get("group_order", [])
+            if isinstance(saved_order, list):
+                self.group_order = [str(group).strip() for group in saved_order if str(group).strip()]
+
+            analysis = data.get("analysis_params", {})
+            if isinstance(analysis, dict):
+                self._set_input_if_present("#input_height", str(analysis.get("sample_height", "10.0")))
+                self._set_input_if_present("#input_area", str(analysis.get("contact_area", "100.0")))
+                self._set_input_if_present("#input_baseline_points", str(analysis.get("baseline_points", "10")))
+                self._set_input_if_present("#input_trigger", str(analysis.get("trigger_force", "0.05")))
+                self._set_input_if_present("#input_prominence", str(analysis.get("peak_prominence", "0.5")))
+                self._set_input_if_present("#input_peak_distance", str(analysis.get("peak_distance", "200")))
+                self._set_input_if_present("#input_mod_min", str(analysis.get("modulus_min", "10")))
+                self._set_input_if_present("#input_mod_max", str(analysis.get("modulus_max", "30")))
+                self._set_select_if_present("#select_stats_mode", str(analysis.get("stats_mode", "auto")))
+
+            builder = data.get("plot_builder", {})
+            if isinstance(builder, dict):
+                self._set_select_if_present("#select_x_var", str(builder.get("x_var", "Time (s)")))
+                self._set_input_if_present("#input_y_vars", str(builder.get("y_vars", "Force (N), Deformation (mm)")))
+                self._set_select_if_present("#select_graph_mode", str(builder.get("graph_mode", "panel")))
+                self._set_select_if_present("#select_curve_mode", str(builder.get("curve_mode", "mean_band")))
+                self._set_select_if_present("#select_band_mode", str(builder.get("band_mode", "sd")))
+                self._set_input_if_present("#input_graph_title", str(builder.get("graph_title", "Custom Graph")))
+                self._set_select_if_present("#select_overlay_mode", str(builder.get("overlay_mode", "mean_band")))
+
+            figure = data.get("figure_style", {})
+            if isinstance(figure, dict):
+                self._set_select_if_present("#select_ratio", str(figure.get("ratio", "4:3")))
+                self._set_input_if_present("#input_width", str(figure.get("width_in", "")))
+                self._set_input_if_present("#input_height_fig", str(figure.get("height_in", "")))
+                self._set_input_if_present("#input_dpi", str(figure.get("dpi", "300")))
+
+            colors = data.get("colors", {})
+            if isinstance(colors, dict):
+                force_colors = colors.get("group_force_colors", {})
+                defo_colors = colors.get("group_deformation_colors", {})
+                stress_colors = colors.get("group_stress_colors", {})
+                if isinstance(force_colors, dict):
+                    self.plot_style.group_force_colors = {str(k): str(v).upper() for k, v in force_colors.items()}
+                if isinstance(defo_colors, dict):
+                    self.plot_style.group_deformation_colors = {str(k): str(v).upper() for k, v in defo_colors.items()}
+                if isinstance(stress_colors, dict):
+                    self.plot_style.group_stress_colors = {str(k): str(v).upper() for k, v in stress_colors.items()}
+                selected_color_group = str(colors.get("selected_color_group", "")).strip()
+                self._pending_color_group = selected_color_group or None
+                self._set_input_if_present("#input_force_hex", str(colors.get("force_hex_input", "#2563EB")))
+                self._set_input_if_present("#input_defo_hex", str(colors.get("defo_hex_input", "#059669")))
+                self._set_input_if_present("#input_stress_hex", str(colors.get("stress_hex_input", "#D97706")))
+
+            specs = data.get("graph_specs", [])
+            restored_specs: list[GraphSpec] = []
+            if isinstance(specs, list):
+                for item in specs:
+                    if not isinstance(item, dict):
+                        continue
+                    try:
+                        restored_specs.append(GraphSpec(**item))
+                    except Exception:
+                        continue
+            self.graph_specs = restored_specs
+            self._render_graph_specs()
+
+            raw_selected = data.get("selected_file_index")
+            if isinstance(raw_selected, int):
+                selected_idx = raw_selected
+        except Exception as exc:
+            self._log(f"Session load failed: {exc}")
+            return False, None
+        finally:
+            self._loading_session = False
+
+        return True, selected_idx
+
     def _refresh_directory(self) -> None:
         try:
             directory = self._resolve_directory()
             if not directory.exists() or not directory.is_dir():
+                self.active_directory = None
                 self.file_records = []
                 self.selected_file_index = None
                 self._render_file_list()
@@ -503,6 +739,7 @@ class TPAAnalyzerApp(App):
                 key=lambda item: item.name.lower(),
             )
 
+            self.active_directory = directory
             self.file_records = [
                 {
                     "filename": path.name,
@@ -513,17 +750,29 @@ class TPAAnalyzerApp(App):
             ]
 
             self.selected_file_index = None
+            loaded_session, selected_idx = self._load_session_for_directory(directory)
             self._sync_group_order_from_records()
-            self._render_file_list()
+            self._render_file_list(selected_idx=selected_idx)
             self._update_color_group_select()
+            if self._pending_color_group and self._pending_color_group in self.group_order:
+                self.query_one("#select_color_group", Select).value = self._pending_color_group
+                self._sync_color_inputs_for_group(self._pending_color_group)
+            self._pending_color_group = None
+            self._update_figure_preview()
+            self._autosave_session()
 
             if self.file_records:
-                self._set_status(f"Loaded {len(self.file_records)} files from {directory}")
-                self._log(f"Directory refreshed: {directory} ({len(self.file_records)} files)")
+                if loaded_session:
+                    self._set_status(f"Loaded {len(self.file_records)} files from {directory} (session restored)")
+                    self._log(f"Directory refreshed: {directory} ({len(self.file_records)} files, session restored)")
+                else:
+                    self._set_status(f"Loaded {len(self.file_records)} files from {directory}")
+                    self._log(f"Directory refreshed: {directory} ({len(self.file_records)} files)")
             else:
                 self._set_status(f"No .csv/.tra files found in {directory}")
                 self._log(f"Directory refreshed: {directory} (no compatible files)")
         except Exception as exc:
+            self.active_directory = None
             self.file_records = []
             self.selected_file_index = None
             self._sync_group_order_from_records()
@@ -533,25 +782,23 @@ class TPAAnalyzerApp(App):
             self._log(f"Refresh failed: {exc}")
 
     def _render_file_list(self, selected_idx: int | None = None) -> None:
-        list_view = self.query_one("#file_list", OptionList)
-        list_view.clear_options()
+        table = self.query_one("#file_list", DataTable)
+        table.clear(columns=False)
         if not self.file_records:
             self.selected_file_index = None
             self.query_one("#input_group", Input).value = ""
             self.query_one("#selected_file_info", Static).update("Selected: none")
-            list_view.add_option("No files detected")
             self._update_group_summary()
             return
 
-        options: list[str] = []
         for idx, record in enumerate(self.file_records):
-            group = record["group"]
-            options.append(f"{idx + 1:02d} | {group:<18} | {record['filename']}")
-        list_view.add_options(options)
+            group = record["group"].strip() or "UNASSIGNED"
+            filename = record["filename"]
+            table.add_row(f"{idx + 1:02d}", group, filename, key=str(idx))
         if selected_idx is None:
             selected_idx = 0
         selected_idx = max(0, min(selected_idx, len(self.file_records) - 1))
-        list_view.highlighted = selected_idx
+        table.move_cursor(row=selected_idx, column=0, animate=False, scroll=True)
         self._set_selected_file(selected_idx, update_status=False)
         self._update_group_summary()
 
@@ -820,19 +1067,19 @@ class TPAAnalyzerApp(App):
     def handle_refresh(self) -> None:
         self._refresh_directory()
 
-    @on(OptionList.OptionSelected, "#file_list")
-    def handle_file_selected(self, event: OptionList.OptionSelected) -> None:
-        idx = int(event.option_index)
+    @on(DataTable.RowSelected, "#file_list")
+    def handle_file_selected(self, event: DataTable.RowSelected) -> None:
+        idx = int(event.cursor_row)
         if not self.file_records:
             return
 
         self._set_selected_file(idx, update_status=True)
 
-    @on(OptionList.OptionHighlighted, "#file_list")
-    def handle_file_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+    @on(DataTable.RowHighlighted, "#file_list")
+    def handle_file_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if not self.file_records:
             return
-        idx = int(event.option_index)
+        idx = int(event.cursor_row)
         self._set_selected_file(idx, update_status=False)
 
     @on(OptionList.OptionHighlighted, "#group_order_list")
@@ -857,6 +1104,7 @@ class TPAAnalyzerApp(App):
         self._update_group_summary()
         self._reorder_existing_stats_results()
         self._set_status("Moved selected group up.")
+        self._autosave_session()
 
     @on(Button.Pressed, "#btn_group_down")
     def handle_group_down(self) -> None:
@@ -870,15 +1118,16 @@ class TPAAnalyzerApp(App):
         self._update_group_summary()
         self._reorder_existing_stats_results()
         self._set_status("Moved selected group down.")
+        self._autosave_session()
 
     @on(Button.Pressed, "#btn_assign_group")
     def handle_assign_group(self) -> None:
         if self.selected_file_index is None:
-            list_view = self.query_one("#file_list", OptionList)
-            if self.file_records and list_view.highlighted is not None:
-                highlighted_idx = int(list_view.highlighted)
-                if 0 <= highlighted_idx < len(self.file_records):
-                    self._set_selected_file(highlighted_idx, update_status=False)
+            table = self.query_one("#file_list", DataTable)
+            if self.file_records:
+                cursor_row = int(table.cursor_coordinate.row)
+                if 0 <= cursor_row < len(self.file_records):
+                    self._set_selected_file(cursor_row, update_status=False)
 
         if self.selected_file_index is None:
             self._set_status("Select a file first.")
@@ -896,6 +1145,7 @@ class TPAAnalyzerApp(App):
         self._render_file_list(selected_idx=next_idx)
         self._update_color_group_select()
         self._set_status(f"Assigned '{group}' to {self.file_records[current_idx]['filename']}.")
+        self._autosave_session()
 
     @on(Button.Pressed, "#btn_assign_matching")
     def handle_assign_matching(self) -> None:
@@ -931,6 +1181,7 @@ class TPAAnalyzerApp(App):
             else f"{len(matched_indices)} files matching {', '.join(terms)}"
         )
         self._set_status(f"Assigned group '{group}' to {scope}.")
+        self._autosave_session()
 
     @on(Select.Changed, "#select_color_group")
     def handle_color_group_changed(self, event: Select.Changed) -> None:
@@ -938,6 +1189,7 @@ class TPAAnalyzerApp(App):
         if group == "__none__":
             return
         self._sync_color_inputs_for_group(group)
+        self._autosave_session()
 
     @on(Button.Pressed)
     def handle_parameter_info_click(self, event: Button.Pressed) -> None:
@@ -973,6 +1225,7 @@ class TPAAnalyzerApp(App):
         self.plot_style.group_deformation_colors[group] = defo_hex
         self.plot_style.group_stress_colors[group] = stress_hex
         self._set_status(f"Applied custom colors to group '{group}'.")
+        self._autosave_session()
 
     @on(Button.Pressed, "#btn_reset_palette")
     def reset_palette(self) -> None:
@@ -982,6 +1235,7 @@ class TPAAnalyzerApp(App):
         if group != "__none__":
             self._sync_color_inputs_for_group(group)
         self._set_status("Reset color overrides to auto palette.")
+        self._autosave_session()
 
     @on(Button.Pressed, "#btn_add_graph")
     def add_graph_spec(self) -> None:
@@ -992,12 +1246,14 @@ class TPAAnalyzerApp(App):
         self.graph_specs.append(spec)
         self._render_graph_specs()
         self._set_status(f"Added graph spec: {spec.title}")
+        self._autosave_session()
 
     @on(Button.Pressed, "#btn_clear_graphs")
     def clear_graph_specs(self) -> None:
         self.graph_specs.clear()
         self._render_graph_specs()
         self._set_status("Cleared custom graph specs.")
+        self._autosave_session()
 
     @on(Input.Changed, "#input_width")
     @on(Input.Changed, "#input_height_fig")
@@ -1005,6 +1261,36 @@ class TPAAnalyzerApp(App):
     @on(Select.Changed, "#select_ratio")
     def handle_figure_inputs_changed(self) -> None:
         self._update_figure_preview()
+        self._autosave_session()
+
+    @on(Input.Changed, "#input_height")
+    @on(Input.Changed, "#input_area")
+    @on(Input.Changed, "#input_baseline_points")
+    @on(Input.Changed, "#input_trigger")
+    @on(Input.Changed, "#input_prominence")
+    @on(Input.Changed, "#input_peak_distance")
+    @on(Input.Changed, "#input_mod_min")
+    @on(Input.Changed, "#input_mod_max")
+    @on(Input.Changed, "#input_y_vars")
+    @on(Input.Changed, "#input_graph_title")
+    @on(Input.Changed, "#input_group")
+    @on(Input.Changed, "#input_group_filter")
+    @on(Input.Changed, "#input_force_hex")
+    @on(Input.Changed, "#input_defo_hex")
+    @on(Input.Changed, "#input_stress_hex")
+    def handle_persistent_input_changed(self, event: Input.Changed) -> None:
+        _ = event
+        self._autosave_session()
+
+    @on(Select.Changed, "#select_stats_mode")
+    @on(Select.Changed, "#select_x_var")
+    @on(Select.Changed, "#select_graph_mode")
+    @on(Select.Changed, "#select_curve_mode")
+    @on(Select.Changed, "#select_band_mode")
+    @on(Select.Changed, "#select_overlay_mode")
+    def handle_persistent_select_changed(self, event: Select.Changed) -> None:
+        _ = event
+        self._autosave_session()
 
     @on(Button.Pressed, "#btn_analyze")
     def trigger_analysis(self) -> None:
@@ -1033,6 +1319,7 @@ class TPAAnalyzerApp(App):
 
         metric_rows: list[dict[str, Any]] = []
         traces: list[pd.DataFrame] = []
+        qc_rows: list[dict[str, Any]] = []
         warnings: list[str] = []
         failures: list[str] = []
 
@@ -1067,6 +1354,10 @@ class TPAAnalyzerApp(App):
                 if isinstance(trace, pd.DataFrame) and not trace.empty:
                     traces.append(trace)
 
+                qc_summary = result.get("QC Summary")
+                if isinstance(qc_summary, dict):
+                    qc_rows.append(qc_summary)
+
                 for warning in result.get("Warnings", []):
                     warnings.append(f"{filename}: {warning}")
             except Exception as exc:
@@ -1074,6 +1365,7 @@ class TPAAnalyzerApp(App):
 
         metrics_df = pd.DataFrame(metric_rows)
         trace_df = pd.concat(traces, ignore_index=True) if traces else pd.DataFrame()
+        qc_df = pd.DataFrame(qc_rows)
 
         stats_results: dict[str, dict[str, Any]] = {}
         if not metrics_df.empty:
@@ -1107,6 +1399,7 @@ class TPAAnalyzerApp(App):
             self._apply_analysis_results,
             metrics_df,
             trace_df,
+            qc_df,
             stats_results,
             warnings,
             failures,
@@ -1117,12 +1410,14 @@ class TPAAnalyzerApp(App):
         self,
         metrics_df: pd.DataFrame,
         trace_df: pd.DataFrame,
+        qc_df: pd.DataFrame,
         stats_results: dict[str, dict[str, Any]],
         warnings: list[str],
         failures: list[str],
     ) -> None:
         self.metrics_df = metrics_df
         self.trace_df = trace_df
+        self.qc_df = qc_df
         self.stats_results = stats_results
 
         self._sync_group_order_from_records()
@@ -1143,18 +1438,54 @@ class TPAAnalyzerApp(App):
             f"Analysis done. Valid files: {len(metrics_df)} | Stats metrics: {len(stats_results)} | Failures: {len(failures)}"
         )
         self._log("Analysis completed.")
+        self._autosave_session()
 
-    def _build_stats_exports(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def _format_stats_note(self, test_info: dict[str, Any]) -> str:
+        decision = str(test_info.get("decision", "unknown"))
+        reason = str(test_info.get("decision_reason", ""))
+        global_test = str(test_info.get("global_test", ""))
+        alpha = test_info.get("alpha", "")
+        global_p_raw = test_info.get("global_p")
+        try:
+            global_p_text = f"{float(global_p_raw):.4g}"
+        except (TypeError, ValueError):
+            global_p_text = "NA"
+        return (
+            f"Decision={decision}; Global={global_test} (p={global_p_text}); "
+            f"Pairwise significant when adjusted p < {alpha}. Reason: {reason}"
+        )
+
+    def _build_stats_exports(
+        self,
+        stats_results: dict[str, dict[str, Any]] | None = None,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         summary_frames: list[pd.DataFrame] = []
         pairwise_frames: list[pd.DataFrame] = []
+        source = stats_results if stats_results is not None else self.stats_results
 
-        for metric, result in self.stats_results.items():
-            summary = result["summary_df"].copy()
+        for metric, result in source.items():
+            summary = result.get("summary_df", pd.DataFrame()).copy()
+            test_info = result.get("test_info", {})
+            note = self._format_stats_note(test_info)
             summary.insert(0, "Metric", metric)
+            summary["Stats Mode"] = str(test_info.get("mode", ""))
+            summary["Stats Decision"] = str(test_info.get("decision", ""))
+            summary["Global Test"] = str(test_info.get("global_test", ""))
+            summary["Global P"] = test_info.get("global_p")
+            summary["Alpha"] = test_info.get("alpha")
+            summary["Decision Reason"] = str(test_info.get("decision_reason", ""))
+            summary["Stats Note"] = note
             summary_frames.append(summary)
 
-            pairwise = result["pairwise_df"].copy()
+            pairwise = result.get("pairwise_df", pd.DataFrame()).copy()
             if not pairwise.empty:
+                pairwise["Stats Mode"] = str(test_info.get("mode", ""))
+                pairwise["Stats Decision"] = str(test_info.get("decision", ""))
+                pairwise["Global Test"] = str(test_info.get("global_test", ""))
+                pairwise["Global P"] = test_info.get("global_p")
+                pairwise["Alpha"] = test_info.get("alpha")
+                pairwise["Decision Reason"] = str(test_info.get("decision_reason", ""))
+                pairwise["Stats Note"] = note
                 pairwise_frames.append(pairwise)
 
         summary_df = pd.concat(summary_frames, ignore_index=True) if summary_frames else pd.DataFrame()
@@ -1174,37 +1505,39 @@ class TPAAnalyzerApp(App):
             return
 
         metrics_df = self.metrics_df.copy()
+        qc_df = self.qc_df.copy()
         stats_results = self.stats_results.copy()
-        self.export_tables_worker(metrics_df, stats_results)
+        self.export_tables_worker(metrics_df, qc_df, stats_results)
 
     @work(thread=True, exclusive=True)
-    def export_tables_worker(self, metrics_df: pd.DataFrame, stats_results: dict[str, dict[str, Any]]) -> None:
+    def export_tables_worker(
+        self,
+        metrics_df: pd.DataFrame,
+        qc_df: pd.DataFrame,
+        stats_results: dict[str, dict[str, Any]],
+    ) -> None:
         self.call_from_thread(self._set_buttons_disabled, True)
         try:
             export_root = self._current_export_root("exports")
             metrics_path = export_root / "tpa_results_summary.csv"
             metrics_df.to_csv(metrics_path, index=False)
-
-            summary_frames: list[pd.DataFrame] = []
-            pairwise_frames: list[pd.DataFrame] = []
-            for metric, result in stats_results.items():
-                summary = result["summary_df"].copy()
-                summary.insert(0, "Metric", metric)
-                summary_frames.append(summary)
-                pairwise = result["pairwise_df"].copy()
-                if not pairwise.empty:
-                    pairwise_frames.append(pairwise)
+            qc_path = export_root / "tpa_qc_summary.csv"
+            if not qc_df.empty:
+                qc_df.to_csv(qc_path, index=False)
+            else:
+                pd.DataFrame().to_csv(qc_path, index=False)
+            summary_df, pairwise_df = self._build_stats_exports(stats_results=stats_results)
 
             summary_path = export_root / "tpa_group_stats.csv"
             pairwise_path = export_root / "tpa_pairwise_stats.csv"
 
-            if summary_frames:
-                pd.concat(summary_frames, ignore_index=True).to_csv(summary_path, index=False)
+            if not summary_df.empty:
+                summary_df.to_csv(summary_path, index=False)
             else:
                 pd.DataFrame().to_csv(summary_path, index=False)
 
-            if pairwise_frames:
-                pd.concat(pairwise_frames, ignore_index=True).to_csv(pairwise_path, index=False)
+            if not pairwise_df.empty:
+                pairwise_df.to_csv(pairwise_path, index=False)
             else:
                 pd.DataFrame().to_csv(pairwise_path, index=False)
 
@@ -1223,6 +1556,7 @@ class TPAAnalyzerApp(App):
             return
 
         trace_df = self.trace_df.copy()
+        qc_df = self.qc_df.copy()
         stats_results = self.stats_results.copy()
         graph_specs = [GraphSpec(**asdict(spec)) for spec in self.graph_specs]
         style = PlotStyleConfig(
@@ -1240,12 +1574,13 @@ class TPAAnalyzerApp(App):
         overlay_mode = str(self.query_one("#select_overlay_mode", Select).value)
         band_mode = str(self.query_one("#select_band_mode", Select).value)
 
-        self.export_plots_worker(trace_df, stats_results, graph_specs, style, fig_cfg, overlay_mode, band_mode, group_order)
+        self.export_plots_worker(trace_df, qc_df, stats_results, graph_specs, style, fig_cfg, overlay_mode, band_mode, group_order)
 
     @work(thread=True, exclusive=True)
     def export_plots_worker(
         self,
         trace_df: pd.DataFrame,
+        qc_df: pd.DataFrame,
         stats_results: dict[str, dict[str, Any]],
         graph_specs: list[GraphSpec],
         style: PlotStyleConfig,
@@ -1262,7 +1597,11 @@ class TPAAnalyzerApp(App):
             default_stack_path = output_root / "default_stack.png"
             plot_trace_stack(
                 trace_df,
-                spec={"curve_mode": overlay_mode if overlay_mode != "individual" else "individual", "band_mode": band_mode},
+                spec={
+                    "curve_mode": overlay_mode if overlay_mode != "individual" else "individual",
+                    "band_mode": band_mode,
+                    "group_order": group_order,
+                },
                 style=style,
                 output_path=default_stack_path,
                 figure_config=fig_cfg,
@@ -1292,9 +1631,19 @@ class TPAAnalyzerApp(App):
                 style=style,
                 output_dir=custom_dir,
                 figure_config=fig_cfg,
+                group_order=group_order,
             )
             for warning in custom_payload.get("warnings", []):
                 self.call_from_thread(self._log, f"Plot warning: {warning}")
+
+            qc_payload = export_qc_report(
+                trace_df=trace_df,
+                qc_df=qc_df,
+                output_dir=output_root / "qc_report",
+                figure_config=fig_cfg,
+            )
+            for warning in qc_payload.get("warnings", []):
+                self.call_from_thread(self._log, f"QC warning: {warning}")
 
             self.call_from_thread(self._set_status, f"Plots exported to {output_root}")
             self.call_from_thread(self._log, f"Plots exported: {output_root}")
@@ -1312,6 +1661,7 @@ class TPAAnalyzerApp(App):
 
         metrics_df = self.metrics_df.copy()
         trace_df = self.trace_df.copy()
+        qc_df = self.qc_df.copy()
         stats_results = self.stats_results.copy()
         graph_specs = [GraphSpec(**asdict(spec)) for spec in self.graph_specs]
         style = PlotStyleConfig(
@@ -1332,6 +1682,7 @@ class TPAAnalyzerApp(App):
         self.export_all_worker(
             metrics_df,
             trace_df,
+            qc_df,
             stats_results,
             graph_specs,
             style,
@@ -1346,6 +1697,7 @@ class TPAAnalyzerApp(App):
         self,
         metrics_df: pd.DataFrame,
         trace_df: pd.DataFrame,
+        qc_df: pd.DataFrame,
         stats_results: dict[str, dict[str, Any]],
         graph_specs: list[GraphSpec],
         style: PlotStyleConfig,
@@ -1358,24 +1710,19 @@ class TPAAnalyzerApp(App):
         try:
             root = self._current_export_root("exports")
             metrics_df.to_csv(root / "tpa_results_summary.csv", index=False)
+            if not qc_df.empty:
+                qc_df.to_csv(root / "tpa_qc_summary.csv", index=False)
+            else:
+                pd.DataFrame().to_csv(root / "tpa_qc_summary.csv", index=False)
+            summary_df, pairwise_df = self._build_stats_exports(stats_results=stats_results)
 
-            summary_frames: list[pd.DataFrame] = []
-            pairwise_frames: list[pd.DataFrame] = []
-            for metric, result in stats_results.items():
-                summary = result["summary_df"].copy()
-                summary.insert(0, "Metric", metric)
-                summary_frames.append(summary)
-                pairwise = result["pairwise_df"].copy()
-                if not pairwise.empty:
-                    pairwise_frames.append(pairwise)
-
-            if summary_frames:
-                pd.concat(summary_frames, ignore_index=True).to_csv(root / "tpa_group_stats.csv", index=False)
+            if not summary_df.empty:
+                summary_df.to_csv(root / "tpa_group_stats.csv", index=False)
             else:
                 pd.DataFrame().to_csv(root / "tpa_group_stats.csv", index=False)
 
-            if pairwise_frames:
-                pd.concat(pairwise_frames, ignore_index=True).to_csv(root / "tpa_pairwise_stats.csv", index=False)
+            if not pairwise_df.empty:
+                pairwise_df.to_csv(root / "tpa_pairwise_stats.csv", index=False)
             else:
                 pd.DataFrame().to_csv(root / "tpa_pairwise_stats.csv", index=False)
 
@@ -1384,7 +1731,11 @@ class TPAAnalyzerApp(App):
 
             plot_trace_stack(
                 trace_df,
-                spec={"curve_mode": overlay_mode if overlay_mode != "individual" else "individual", "band_mode": band_mode},
+                spec={
+                    "curve_mode": overlay_mode if overlay_mode != "individual" else "individual",
+                    "band_mode": band_mode,
+                    "group_order": group_order,
+                },
                 style=style,
                 output_path=plot_root / "default_stack.png",
                 figure_config=fig_cfg,
@@ -1418,9 +1769,19 @@ class TPAAnalyzerApp(App):
                 style=style,
                 output_dir=plot_root / "custom",
                 figure_config=fig_cfg,
+                group_order=group_order,
             )
             for warning in custom_payload.get("warnings", []):
                 self.call_from_thread(self._log, f"Plot warning: {warning}")
+
+            qc_payload = export_qc_report(
+                trace_df=trace_df,
+                qc_df=qc_df,
+                output_dir=root / "qc_report",
+                figure_config=fig_cfg,
+            )
+            for warning in qc_payload.get("warnings", []):
+                self.call_from_thread(self._log, f"QC warning: {warning}")
 
             self.call_from_thread(self._set_status, f"Export all completed: {root}")
             self.call_from_thread(self._log, f"Export all completed: {root}")

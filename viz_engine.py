@@ -218,16 +218,28 @@ def _plot_individual(
     x_col: str,
     y_col: str,
     style: PlotStyleConfig,
+    group_order: list[str] | None = None,
 ) -> None:
-    for (group, file_name), frame in trace_df.groupby(["Group", "File"], sort=False):
-        ordered = frame.sort_values(x_col)
-        ax.plot(
-            ordered[x_col],
-            ordered[y_col],
-            color=style.get_color(str(group), y_col),
-            alpha=style.replicate_alpha,
-            linewidth=style.replicate_linewidth,
-        )
+    requested_order = [str(group).strip() for group in (group_order or []) if str(group).strip()]
+    groups_present = trace_df["Group"].dropna().astype(str).tolist()
+    unique_present: list[str] = []
+    for group in groups_present:
+        if group not in unique_present:
+            unique_present.append(group)
+    ordered_groups = [group for group in requested_order if group in unique_present]
+    ordered_groups.extend([group for group in unique_present if group not in ordered_groups])
+
+    for group in ordered_groups:
+        group_frame = trace_df[trace_df["Group"].astype(str) == group]
+        for _, frame in group_frame.groupby("File", sort=False):
+            ordered = frame.sort_values(x_col)
+            ax.plot(
+                ordered[x_col],
+                ordered[y_col],
+                color=style.get_color(str(group), y_col),
+                alpha=style.replicate_alpha,
+                linewidth=style.replicate_linewidth,
+            )
 
 
 def build_mean_band(
@@ -322,12 +334,25 @@ def _plot_mean_band(
     y_col: str,
     style: PlotStyleConfig,
     band_mode: str,
+    group_order: list[str] | None = None,
 ) -> None:
     band_df = build_mean_band(trace_df, x_col=x_col, y_col=y_col, band_mode=band_mode)
     if band_df.empty:
         return
 
-    for group_name, frame in band_df.groupby("Group", sort=False):
+    requested_order = [str(group).strip() for group in (group_order or []) if str(group).strip()]
+    groups_present = band_df["Group"].dropna().astype(str).tolist()
+    unique_present: list[str] = []
+    for group in groups_present:
+        if group not in unique_present:
+            unique_present.append(group)
+    ordered_groups = [group for group in requested_order if group in unique_present]
+    ordered_groups.extend([group for group in unique_present if group not in ordered_groups])
+
+    for group_name in ordered_groups:
+        frame = band_df[band_df["Group"].astype(str) == group_name]
+        if frame.empty:
+            continue
         ordered = frame.sort_values(x_col)
         color = style.get_color(str(group_name), y_col)
         ax.fill_between(
@@ -354,16 +379,48 @@ def _apply_curve_mode(
     style: PlotStyleConfig,
     curve_mode: str,
     band_mode: str,
+    group_order: list[str] | None = None,
 ) -> None:
     mode = curve_mode.lower().strip()
     if mode in {"individual", "both"}:
-        _plot_individual(ax, trace_df, x_col, y_col, style)
+        _plot_individual(ax, trace_df, x_col, y_col, style, group_order=group_order)
     if mode in {"mean_band", "both"}:
-        _plot_mean_band(ax, trace_df, x_col, y_col, style, band_mode=band_mode)
+        _plot_mean_band(ax, trace_df, x_col, y_col, style, band_mode=band_mode, group_order=group_order)
 
 
 def _axis_label(label: str) -> str:
     return VARIABLE_REGISTRY.get(label, {}).get("axis", label)
+
+
+def _ordered_legend(
+    handles: list[Any],
+    labels: list[str],
+    group_order: list[str] | None = None,
+) -> tuple[list[Any], list[str]]:
+    dedup_handles: list[Any] = []
+    dedup_labels: list[str] = []
+    seen: set[str] = set()
+    for handle, label in zip(handles, labels):
+        label_clean = str(label).strip()
+        if not label_clean or label_clean in seen:
+            continue
+        seen.add(label_clean)
+        dedup_handles.append(handle)
+        dedup_labels.append(label_clean)
+
+    requested_order = [str(group).strip() for group in (group_order or []) if str(group).strip()]
+    if not requested_order:
+        return dedup_handles, dedup_labels
+
+    order_map = {group: idx for idx, group in enumerate(requested_order)}
+    ordered_items = sorted(
+        list(zip(dedup_handles, dedup_labels)),
+        key=lambda item: (order_map.get(item[1], 10_000), dedup_labels.index(item[1])),
+    )
+    if not ordered_items:
+        return dedup_handles, dedup_labels
+    ordered_handles, ordered_labels = zip(*ordered_items)
+    return list(ordered_handles), list(ordered_labels)
 
 
 def plot_trace_stack(
@@ -382,6 +439,7 @@ def plot_trace_stack(
     y_labels = ["Force (N)", "Deformation (mm)"]
     curve_mode = str((spec or {}).get("curve_mode", "individual"))
     band_mode = str((spec or {}).get("band_mode", "sd"))
+    group_order = [str(group).strip() for group in (spec or {}).get("group_order", []) if str(group).strip()]
 
     x_col = _require_column(trace_df, x_label)
 
@@ -391,7 +449,16 @@ def plot_trace_stack(
     for idx, y_label in enumerate(y_labels):
         y_col = _require_column(trace_df, y_label)
         ax = axes[idx]
-        _apply_curve_mode(ax, trace_df, x_col, y_col, style, curve_mode=curve_mode, band_mode=band_mode)
+        _apply_curve_mode(
+            ax,
+            trace_df,
+            x_col,
+            y_col,
+            style,
+            curve_mode=curve_mode,
+            band_mode=band_mode,
+            group_order=group_order,
+        )
         ax.set_ylabel(_axis_label(y_label))
         ax.grid(True, linestyle="--", alpha=0.25)
 
@@ -399,6 +466,7 @@ def plot_trace_stack(
     axes[0].set_title("TPA Default Trace Stack")
 
     handles, labels = axes[0].get_legend_handles_labels()
+    handles, labels = _ordered_legend(handles, labels, group_order=group_order)
     if handles:
         axes[0].legend(handles, labels, frameon=False)
 
@@ -414,6 +482,7 @@ def plot_custom_graphs(
     style: PlotStyleConfig,
     output_dir: str | Path,
     figure_config: FigureConfig | None = None,
+    group_order: list[str] | None = None,
 ) -> dict[str, Any]:
     """Generate user-defined x/y plots in panel or overlay mode."""
     figure_config = figure_config or FigureConfig()
@@ -451,12 +520,14 @@ def plot_custom_graphs(
                     style,
                     curve_mode=spec.curve_mode,
                     band_mode=spec.band_mode,
+                    group_order=group_order,
                 )
             ax.set_xlabel(_axis_label(spec.x_col))
             ax.set_ylabel(" / ".join(_axis_label(label) for label in spec.y_cols))
             ax.set_title(spec.title)
             ax.grid(True, linestyle="--", alpha=0.25)
             handles, labels = ax.get_legend_handles_labels()
+            handles, labels = _ordered_legend(handles, labels, group_order=group_order)
             if handles:
                 ax.legend(handles, labels, frameon=False)
         else:
@@ -473,6 +544,7 @@ def plot_custom_graphs(
                     style,
                     curve_mode=spec.curve_mode,
                     band_mode=spec.band_mode,
+                    group_order=group_order,
                 )
                 ax.set_ylabel(_axis_label(y_label))
                 ax.grid(True, linestyle="--", alpha=0.25)
@@ -480,6 +552,7 @@ def plot_custom_graphs(
             axes[-1].set_xlabel(_axis_label(spec.x_col))
             axes[0].set_title(spec.title)
             handles, labels = axes[0].get_legend_handles_labels()
+            handles, labels = _ordered_legend(handles, labels, group_order=group_order)
             if handles:
                 axes[0].legend(handles, labels, frameon=False)
 
@@ -489,6 +562,270 @@ def plot_custom_graphs(
         fig.savefig(path, dpi=figure_config.dpi, bbox_inches="tight")
         plt.close(fig)
         saved_paths.append(str(path))
+
+    return {"paths": saved_paths, "warnings": warnings}
+
+
+def export_qc_report(
+    trace_df: pd.DataFrame,
+    qc_df: pd.DataFrame,
+    output_dir: str | Path,
+    figure_config: FigureConfig | None = None,
+) -> dict[str, Any]:
+    """Export a compact QC package with tables and per-file annotated plots."""
+    figure_config = figure_config or FigureConfig()
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    warnings: list[str] = []
+    saved_paths: list[str] = []
+
+    guide_source = Path(__file__).resolve().parent / "QC_REPORT_INTERPRETATION.md"
+    guide_target = output_dir / "QC_REPORT_INTERPRETATION.md"
+    try:
+        if guide_source.exists():
+            guide_target.write_text(guide_source.read_text(encoding="utf-8"), encoding="utf-8")
+        else:
+            guide_target.write_text(
+                "QC guide missing in project root. See repository file QC_REPORT_INTERPRETATION.md.",
+                encoding="utf-8",
+            )
+            warnings.append("QC interpretation guide source file was not found in project root.")
+    except Exception as exc:
+        warnings.append(f"Could not write QC interpretation guide: {exc}")
+
+    if trace_df.empty:
+        return {"paths": saved_paths, "warnings": ["QC report skipped: trace dataframe is empty."]}
+    if qc_df.empty:
+        return {"paths": saved_paths, "warnings": ["QC report skipped: QC summary dataframe is empty."]}
+
+    qc_sorted = qc_df.copy()
+    for key in ["Group", "Filename"]:
+        if key not in qc_sorted.columns:
+            qc_sorted[key] = ""
+    qc_sorted = qc_sorted.sort_values(["Group", "Filename"], kind="stable").reset_index(drop=True)
+
+    qc_sorted.to_csv(output_dir / "qc_summary.csv", index=False)
+
+    control_cols = [
+        "Filename",
+        "Group",
+        "Baseline Offset (N)",
+        "Trigger Force (N)",
+        "Peak Prominence (N)",
+        "Peak Distance (pts)",
+        "Modulus Strain Min (%)",
+        "Modulus Strain Max (%)",
+    ]
+    present_control_cols = [col for col in control_cols if col in qc_sorted.columns]
+    qc_sorted[present_control_cols].to_csv(output_dir / "qc_control_parameters.csv", index=False)
+
+    marker_cols = [
+        "Filename",
+        "Group",
+        "Peak1 Index",
+        "Peak2 Index",
+        "Bite1 Start Index",
+        "Bite1 End Index",
+        "Bite2 Start Index",
+        "Bite2 End Index",
+        "Peak1 Time (s)",
+        "Peak2 Time (s)",
+        "A1 Area (N*s)",
+        "A2 Area (N*s)",
+        "A1 Up Area (N*s)",
+        "A1 Down Area (N*s)",
+        "Adhesiveness Area (N*s)",
+    ]
+    present_marker_cols = [col for col in marker_cols if col in qc_sorted.columns]
+    qc_sorted[present_marker_cols].to_csv(output_dir / "qc_markers_and_areas.csv", index=False)
+
+    files_dir = output_dir / "files"
+    files_dir.mkdir(parents=True, exist_ok=True)
+
+    def _safe_int(row: pd.Series, key: str, limit: int) -> int:
+        raw = row.get(key, 0)
+        try:
+            idx = int(float(raw))
+        except (TypeError, ValueError):
+            idx = 0
+        return int(np.clip(idx, 0, max(limit - 1, 0)))
+
+    def _safe_float(row: pd.Series, key: str, default: float = float("nan")) -> float:
+        raw = row.get(key, default)
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return default
+
+    for _, row in qc_sorted.iterrows():
+        filename = str(row.get("Filename", "")).strip()
+        if not filename:
+            warnings.append("Skipped one QC row with missing filename.")
+            continue
+
+        frame = trace_df[trace_df["File"].astype(str) == filename].copy()
+        if frame.empty:
+            warnings.append(f"{filename}: missing trace rows; QC figure skipped.")
+            continue
+
+        frame = frame.sort_values("Time (s)").reset_index(drop=True)
+        n_points = len(frame)
+        if n_points < 3:
+            warnings.append(f"{filename}: too few points ({n_points}) for QC figure.")
+            continue
+
+        time_vals = frame["Time (s)"].to_numpy(dtype=float)
+        force_vals = frame["Force Corrected (N)"].to_numpy(dtype=float)
+        strain_vals = frame["True Strain (%)"].to_numpy(dtype=float)
+        stress_vals = frame["True Stress (kPa)"].to_numpy(dtype=float)
+
+        p1 = _safe_int(row, "Peak1 Index", n_points)
+        p2 = _safe_int(row, "Peak2 Index", n_points)
+        b1s = _safe_int(row, "Bite1 Start Index", n_points)
+        b1e = _safe_int(row, "Bite1 End Index", n_points)
+        b2s = _safe_int(row, "Bite2 Start Index", n_points)
+        b2e = _safe_int(row, "Bite2 End Index", n_points)
+
+        trigger = _safe_float(row, "Trigger Force (N)", 0.0)
+        mmin = _safe_float(row, "Modulus Strain Min (%)")
+        mmax = _safe_float(row, "Modulus Strain Max (%)")
+
+        fig, (ax_force, ax_stress) = plt.subplots(
+            2,
+            1,
+            figsize=figure_config.resolve_size(default=(11.0, 8.5)),
+            sharex=False,
+        )
+
+        ax_force.plot(time_vals, force_vals, color="#1F2937", linewidth=1.6, label="Force corrected")
+        ax_force.axhline(0.0, color="#64748B", linewidth=0.9, linestyle="--", alpha=0.7)
+        ax_force.axhline(trigger, color="#0EA5E9", linewidth=0.9, linestyle=":", alpha=0.9, label="Trigger")
+
+        def _fill_segment(start_idx: int, end_idx: int, color: str, label: str, positive_only: bool | None) -> None:
+            left, right = sorted((start_idx, end_idx))
+            if right - left < 1:
+                return
+            x_seg = time_vals[left : right + 1]
+            y_seg = force_vals[left : right + 1]
+            if len(x_seg) < 2:
+                return
+            if positive_only is True:
+                where = y_seg > 0
+            elif positive_only is False:
+                where = y_seg < 0
+            else:
+                where = np.ones_like(y_seg, dtype=bool)
+            if where.sum() < 2:
+                return
+            ax_force.fill_between(x_seg, 0.0, y_seg, where=where, interpolate=True, color=color, alpha=0.25, label=label)
+
+        _fill_segment(b1s, b1e, "#93C5FD", "A1", True)
+        _fill_segment(b2s, b2e, "#86EFAC", "A2", True)
+        _fill_segment(b1e, b2s, "#FCA5A5", "Adhesiveness", False)
+
+        marker_specs = [
+            (b1s, "B1 start", "#0EA5E9"),
+            (p1, "Peak1", "#1D4ED8"),
+            (b1e, "B1 end", "#0EA5E9"),
+            (b2s, "B2 start", "#16A34A"),
+            (p2, "Peak2", "#15803D"),
+            (b2e, "B2 end", "#16A34A"),
+        ]
+        for idx, label, color in marker_specs:
+            x_val = time_vals[idx]
+            y_val = force_vals[idx]
+            ax_force.scatter([x_val], [y_val], s=20, color=color, zorder=4)
+            ax_force.annotate(
+                label,
+                (x_val, y_val),
+                textcoords="offset points",
+                xytext=(5, 5),
+                fontsize=7.5,
+                color=color,
+            )
+
+        a1 = _safe_float(row, "A1 Area (N*s)", 0.0)
+        a2 = _safe_float(row, "A2 Area (N*s)", 0.0)
+        ad = _safe_float(row, "Adhesiveness Area (N*s)", 0.0)
+        hard = _safe_float(row, "Hardness (N)", 0.0)
+        coh = _safe_float(row, "Cohesiveness", 0.0)
+
+        text_lines = [
+            f"A1={a1:.3f} N*s",
+            f"A2={a2:.3f} N*s",
+            f"Adhesiveness={ad:.3f} N*s",
+            f"Hardness={hard:.3f} N",
+            f"Cohesiveness={coh:.3f}",
+        ]
+        ax_force.text(
+            0.995,
+            0.97,
+            "\n".join(text_lines),
+            transform=ax_force.transAxes,
+            ha="right",
+            va="top",
+            fontsize=8,
+            bbox={"facecolor": "#FFFFFF", "edgecolor": "#CBD5E1", "boxstyle": "round,pad=0.3"},
+        )
+
+        ax_force.set_title(f"QC Force Map: {filename}")
+        ax_force.set_xlabel("Time (s)")
+        ax_force.set_ylabel("Force Corrected (N)")
+        ax_force.grid(True, linestyle="--", alpha=0.25)
+        h_force, l_force = ax_force.get_legend_handles_labels()
+        if h_force:
+            ax_force.legend(h_force, l_force, frameon=False, fontsize=8)
+
+        finite_mask = np.isfinite(strain_vals) & np.isfinite(stress_vals)
+        if finite_mask.sum() >= 3:
+            strain_plot = strain_vals[finite_mask]
+            stress_plot = stress_vals[finite_mask]
+            ax_stress.plot(strain_plot, stress_plot, color="#B45309", linewidth=1.6, label="Stress-strain")
+
+            if np.isfinite(mmin) and np.isfinite(mmax) and mmax > mmin:
+                ax_stress.axvspan(mmin, mmax, color="#FDE68A", alpha=0.35, label="Modulus window")
+
+            comp_left, comp_right = sorted((b1s, p1))
+            comp_mask = np.zeros(n_points, dtype=bool)
+            comp_mask[comp_left : comp_right + 1] = True
+            fit_mask = (
+                comp_mask
+                & np.isfinite(strain_vals)
+                & np.isfinite(stress_vals)
+                & (strain_vals >= mmin)
+                & (strain_vals <= mmax)
+            )
+            if fit_mask.sum() >= 2:
+                x_fit = strain_vals[fit_mask] / 100.0
+                y_fit = stress_vals[fit_mask]
+                slope, intercept = np.polyfit(x_fit, y_fit, 1)
+                x_line = np.linspace(float(x_fit.min()), float(x_fit.max()), 48)
+                y_line = slope * x_line + intercept
+                ax_stress.plot(
+                    x_line * 100.0,
+                    y_line,
+                    color="#7C2D12",
+                    linestyle="--",
+                    linewidth=1.2,
+                    label=f"Fit slope={slope:.1f} kPa",
+                )
+        else:
+            ax_stress.text(0.5, 0.5, "Stress/strain unavailable", transform=ax_stress.transAxes, ha="center", va="center")
+
+        ax_stress.set_title("Modulus Context (True Stress vs True Strain)")
+        ax_stress.set_xlabel("True Strain (%)")
+        ax_stress.set_ylabel("True Stress (kPa)")
+        ax_stress.grid(True, linestyle="--", alpha=0.25)
+        h_stress, l_stress = ax_stress.get_legend_handles_labels()
+        if h_stress:
+            ax_stress.legend(h_stress, l_stress, frameon=False, fontsize=8)
+
+        fig.tight_layout()
+        save_path = files_dir / f"{_slugify(filename)}_qc.png"
+        fig.savefig(save_path, dpi=figure_config.dpi, bbox_inches="tight")
+        plt.close(fig)
+        saved_paths.append(str(save_path))
 
     return {"paths": saved_paths, "warnings": warnings}
 
@@ -604,6 +941,7 @@ def plot_overlay_traces(
                 style,
                 curve_mode=mode,
                 band_mode=band_mode,
+                group_order=[str(group_name)],
             )
             ax.set_ylabel(_axis_label(y_label))
             ax.grid(True, linestyle="--", alpha=0.25)

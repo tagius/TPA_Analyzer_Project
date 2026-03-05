@@ -238,6 +238,7 @@ def calculate_tpa(
         true_stress_kpa = (force / config.contact_area_mm2) * 1000.0
 
     modulus_kpa = float("nan")
+    modulus_fit_points = 0
     if config.modulus_strain_min_pct >= config.modulus_strain_max_pct:
         warnings.append("Invalid modulus strain window; expected min < max.")
     else:
@@ -251,6 +252,7 @@ def calculate_tpa(
         fit_mask = comp_mask & strain_mask & np.isfinite(true_stress_kpa) & np.isfinite(true_strain_pct)
 
         if fit_mask.sum() >= 2:
+            modulus_fit_points = int(fit_mask.sum())
             x_vals = true_strain_pct[fit_mask] / 100.0
             y_vals = true_stress_kpa[fit_mask]
             modulus_kpa = float(np.polyfit(x_vals, y_vals, 1)[0])
@@ -297,6 +299,42 @@ def calculate_tpa(
         "Bite1 End": bite1_end,
         "Bite2 Start": bite2_start,
         "Bite2 End": bite2_end,
+    }
+    result["QC Summary"] = {
+        "Filename": file_id,
+        "Group": group,
+        "Baseline Offset (N)": baseline,
+        "Trigger Force (N)": threshold,
+        "Peak Prominence (N)": float(config.peak_prominence_n),
+        "Peak Distance (pts)": int(config.peak_distance_pts),
+        "Modulus Strain Min (%)": float(config.modulus_strain_min_pct),
+        "Modulus Strain Max (%)": float(config.modulus_strain_max_pct),
+        "Peak1 Index": peak1_idx,
+        "Peak2 Index": peak2_idx,
+        "Bite1 Start Index": bite1_start,
+        "Bite1 End Index": bite1_end,
+        "Bite2 Start Index": bite2_start,
+        "Bite2 End Index": bite2_end,
+        "Peak1 Time (s)": float(time_vals[peak1_idx]),
+        "Peak2 Time (s)": float(time_vals[peak2_idx]),
+        "Bite1 Start Time (s)": float(time_vals[bite1_start]),
+        "Bite1 End Time (s)": float(time_vals[bite1_end]),
+        "Bite2 Start Time (s)": float(time_vals[bite2_start]),
+        "Bite2 End Time (s)": float(time_vals[bite2_end]),
+        "Peak1 Force Corrected (N)": float(force[peak1_idx]),
+        "Peak2 Force Corrected (N)": float(force[peak2_idx]),
+        "A1 Area (N*s)": float(area1),
+        "A2 Area (N*s)": float(area2),
+        "A1 Up Area (N*s)": float(area1_up),
+        "A1 Down Area (N*s)": float(area1_down),
+        "Adhesiveness Area (N*s)": float(adhesiveness),
+        "Hardness (N)": float(hardness),
+        "Cohesiveness": float(cohesiveness),
+        "Springiness": float(springiness),
+        "Resilience": float(resilience),
+        "Chewiness": float(chewiness),
+        "Modulus (kPa)": float(modulus_kpa) if np.isfinite(modulus_kpa) else float("nan"),
+        "Modulus Fit Points": modulus_fit_points,
     }
     result["Warnings"] = warnings
 
