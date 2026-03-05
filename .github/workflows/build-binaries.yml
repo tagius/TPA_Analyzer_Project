@@ -1,0 +1,53 @@
+name: Build Binaries
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build one-file executable
+        run: |
+          python -m PyInstaller --noconfirm --onefile --name tpa-analyzer app.py
+
+      - name: Prepare macOS artifact
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p release
+          cp dist/tpa-analyzer release/tpa-analyzer
+
+      - name: Prepare Windows artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          Copy-Item dist/tpa-analyzer.exe release/tpa-analyzer.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tpa-analyzer-${{ runner.os }}
+          path: release/*

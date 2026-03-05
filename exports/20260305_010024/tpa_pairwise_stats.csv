@@ -1,0 +1,71 @@
+Metric,Group1,Group2,Test,Statistic,P_raw,P_adj,Significant
+Hardness (N),10%,15%,Tukey HSD,5.411513701386994,,,False
+Hardness (N),10%,15% 42%pwd,Tukey HSD,0.34798447686084355,,,False
+Hardness (N),10%,5%,Tukey HSD,-6.2155943090193215,,,False
+Hardness (N),10%,control,Tukey HSD,-8.584124361902065,,,False
+Hardness (N),15%,15% 42%pwd,Tukey HSD,-5.0635292245261505,,,False
+Hardness (N),15%,5%,Tukey HSD,-12.000745798854476,,,False
+Hardness (N),15%,control,Tukey HSD,-13.995638063289059,,,False
+Hardness (N),15% 42%pwd,5%,Tukey HSD,-6.5876053628276185,,,False
+Hardness (N),15% 42%pwd,control,Tukey HSD,-8.932108838762908,,,False
+Hardness (N),5%,control,Tukey HSD,-2.9612206417512517,,,False
+Cohesiveness,10%,15%,Tukey HSD,-0.28768639817126435,,,False
+Cohesiveness,10%,15% 42%pwd,Tukey HSD,-0.5561937031311133,,,False
+Cohesiveness,10%,5%,Tukey HSD,-1.7376557836783522,,,False
+Cohesiveness,10%,control,Tukey HSD,-1.5726856433362495,,,False
+Cohesiveness,15%,15% 42%pwd,Tukey HSD,-0.26850730495984887,,,False
+Cohesiveness,15%,5%,Tukey HSD,-1.4301060874520948,,,False
+Cohesiveness,15%,control,Tukey HSD,-1.284999245164985,,,False
+Cohesiveness,15% 42%pwd,5%,Tukey HSD,-1.1430597043075856,,,False
+Cohesiveness,15% 42%pwd,control,Tukey HSD,-1.0164919402051362,,,False
+Cohesiveness,5%,control,Tukey HSD,0.05638411097480758,,,False
+Springiness,10%,15%,Tukey HSD,4.662994416358016,,,False
+Springiness,10%,15% 42%pwd,Tukey HSD,1.865197766543197,,,False
+Springiness,10%,5%,Tukey HSD,-0.31426863203173866,,,False
+Springiness,10%,control,Tukey HSD,-0.7906816619041929,,,False
+Springiness,15%,15% 42%pwd,Tukey HSD,-2.7977966498148192,,,False
+Springiness,15%,5%,Tukey HSD,-5.299219347017914,,,False
+Springiness,15%,control,Tukey HSD,-5.453676078262209,,,False
+Springiness,15% 42%pwd,5%,Tukey HSD,-2.308248918026199,,,False
+Springiness,15% 42%pwd,control,Tukey HSD,-2.6558794284473897,,,False
+Springiness,5%,control,Tukey HSD,-0.5310056196398383,,,False
+Resilience,10%,15%,Tukey HSD,-0.9029134900006947,,,False
+Resilience,10%,15% 42%pwd,Tukey HSD,-1.1550140881989097,,,False
+Resilience,10%,5%,Tukey HSD,-1.8502316015477336,,,False
+Resilience,10%,control,Tukey HSD,-2.535309562021757,,,False
+Resilience,15%,15% 42%pwd,Tukey HSD,-0.25210059819821506,,,False
+Resilience,15%,5%,Tukey HSD,-0.8849764788394654,,,False
+Resilience,15%,control,Tukey HSD,-1.6323960720210624,,,False
+Resilience,15% 42%pwd,5%,Tukey HSD,-0.6154696029941851,,,False
+Resilience,15% 42%pwd,control,Tukey HSD,-1.3802954738228472,,,False
+Resilience,5%,control,Tukey HSD,-0.8601283271657848,,,False
+Chewiness,10%,15%,Dunn (BH),,,,False
+Chewiness,10%,15% 42%pwd,Dunn (BH),,,,False
+Chewiness,10%,5%,Dunn (BH),,,,False
+Chewiness,10%,control,Dunn (BH),,,,False
+Chewiness,15%,15% 42%pwd,Dunn (BH),,,,False
+Chewiness,15%,5%,Dunn (BH),,,,False
+Chewiness,15%,control,Dunn (BH),,,,False
+Chewiness,15% 42%pwd,5%,Dunn (BH),,,,False
+Chewiness,15% 42%pwd,control,Dunn (BH),,,,False
+Chewiness,5%,control,Dunn (BH),,,,False
+Adhesiveness,10%,15%,Tukey HSD,-0.31665794271080705,,,False
+Adhesiveness,10%,15% 42%pwd,Tukey HSD,-0.703064929908795,,,False
+Adhesiveness,10%,5%,Tukey HSD,1.4902798458495645,,,False
+Adhesiveness,10%,control,Tukey HSD,-0.19673853289074192,,,False
+Adhesiveness,15%,15% 42%pwd,Tukey HSD,-0.38640698719798794,,,False
+Adhesiveness,15%,5%,Tukey HSD,1.8288014259708592,,,False
+Adhesiveness,15%,control,Tukey HSD,0.11991940982006512,,,False
+Adhesiveness,15% 42%pwd,5%,Tukey HSD,2.241887871099549,,,False
+Adhesiveness,15% 42%pwd,control,Tukey HSD,0.506326397018053,,,False
+Adhesiveness,5%,control,Tukey HSD,-1.7006021843791967,,,False
+Modulus (kPa),10%,15%,Dunn (BH),,,,False
+Modulus (kPa),10%,15% 42%pwd,Dunn (BH),,,,False
+Modulus (kPa),10%,5%,Dunn (BH),,,,False
+Modulus (kPa),10%,control,Dunn (BH),,,,False
+Modulus (kPa),15%,15% 42%pwd,Dunn (BH),,,,False
+Modulus (kPa),15%,5%,Dunn (BH),,,,False
+Modulus (kPa),15%,control,Dunn (BH),,,,False
+Modulus (kPa),15% 42%pwd,5%,Dunn (BH),,,,False
+Modulus (kPa),15% 42%pwd,control,Dunn (BH),,,,False
+Modulus (kPa),5%,control,Dunn (BH),,,,False
