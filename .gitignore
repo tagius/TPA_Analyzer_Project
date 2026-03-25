@@ -1,3 +1,24 @@
+# Ignore save files 
+.tpa_analyzer_session.json
+
+# Claude workspace folder
+.claude/
+CLAUDE.md
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Node modules (if applicable)
+node_modules/
+
+# Editor settings
+.vscode/
+.idea/
+
+# Environment files
+.env
+.env.local
 .venv/
 venv/
 __pycache__/
@@ -5,5 +26,3 @@ __pycache__/
 build/
 dist/
 *.spec
-.DS_Store
-.tpa_analyzer_session.json
