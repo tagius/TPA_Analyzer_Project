@@ -5,6 +5,10 @@ from __future__ import annotations
 import pytest
 
 from tpa_analyzer.core.models import CustomGraphAxisLayer, CustomGraphOverlay, CustomGraphSpec
+from tpa_analyzer.plotting.custom_graphs import (
+    eligible_overlay_keys,
+    eligible_right_axis_variables,
+)
 
 
 def test_custom_graph_spec_supports_axis_and_overlay_layers() -> None:
@@ -37,3 +41,25 @@ def test_custom_graph_spec_rejects_mismatched_axis_roles() -> None:
             x_domain="Time (s)",
             left_axis=[CustomGraphAxisLayer(variable="Force (N)", role="right")],
         )
+
+
+def test_eligible_right_axis_variables_include_deformation_for_time_domain() -> None:
+    """Time-domain trace graphs should allow deformation on the right axis."""
+    eligible = eligible_right_axis_variables(
+        x_domain="Time (s)",
+        left_variables=["Force Corrected (N)"],
+        analysis_ready=True,
+    )
+
+    assert "Deformation (mm)" in eligible
+
+
+def test_eligible_overlay_keys_include_modulus_window_for_analysis_ready_strain_graph() -> None:
+    """Analysis-ready strain graphs should expose the modulus window overlay."""
+    eligible = eligible_overlay_keys(
+        x_domain="True Strain (%)",
+        left_variables=["True Stress (kPa)"],
+        analysis_ready=True,
+    )
+
+    assert "modulus_window" in eligible
