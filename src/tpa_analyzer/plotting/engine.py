@@ -26,7 +26,7 @@ from tpa_analyzer.core.models import (
     GraphSpec,
     PlotStyleConfig,
 )
-from tpa_analyzer.plotting.custom_graphs import OVERLAY_COMPATIBILITY, SEMANTIC_SEGMENTS
+from tpa_analyzer.plotting.custom_graphs import ANNOTATION_COMPATIBILITY, OVERLAY_COMPATIBILITY, SEMANTIC_SEGMENTS
 from tpa_analyzer.plotting.registry import VARIABLE_REGISTRY, axis_label, registry_entry
 
 
@@ -183,6 +183,12 @@ def _effective_composed_overlays(spec: CustomGraphSpec) -> list[CustomGraphOverl
     return deduped
 
 
+def _segment_is_index_based(segment_key: str) -> bool:
+    """Return ``True`` when a semantic segment can be sliced by row indices."""
+    segment = SEMANTIC_SEGMENTS.get(segment_key)
+    return bool(segment and all(column.endswith("Index") for column in segment.qc_columns))
+
+
 def validate_composed_graph_spec(spec: CustomGraphSpec) -> None:
     """Validate that a composed graph spec is self-consistent and trace-safe."""
     if not spec.title.strip():
@@ -209,10 +215,32 @@ def validate_composed_graph_spec(spec: CustomGraphSpec) -> None:
         raise PlotSpecError("Left-axis variables must share the same unit.")
 
     if spec.view_domain == "semantic_segment":
-        if spec.segment_key not in SEMANTIC_SEGMENTS:
+        segment = SEMANTIC_SEGMENTS.get(spec.segment_key or "")
+        if segment is None:
             raise PlotSpecError(f"Unknown semantic segment: {spec.segment_key}")
+        if not segment.allowed_x_domains or spec.x_domain not in segment.allowed_x_domains:
+            raise PlotSpecError(f"Semantic segment '{spec.segment_key}' does not support x-domain '{spec.x_domain}'.")
+        if not _segment_is_index_based(spec.segment_key):
+            raise PlotSpecError(
+                f"Semantic segment '{spec.segment_key}' uses value-based QC markers and is not supported by the shared slice/rebase path."
+            )
         if not spec.rebase_x:
             raise PlotSpecError("Semantic segment graphs must rebase the X axis.")
+
+        left_variables = {layer.variable for layer in spec.left_axis}
+        for annotation in spec.annotations:
+            annotation_meta = ANNOTATION_COMPATIBILITY.get(annotation.key)
+            if annotation_meta is None:
+                raise PlotSpecError(f"Unknown annotation: {annotation.key}")
+            if spec.segment_key not in annotation_meta.allowed_segments:
+                raise PlotSpecError(
+                    f"Annotation '{annotation.key}' is not compatible with semantic segment '{spec.segment_key}'."
+                )
+            missing_left = [variable for variable in annotation_meta.required_left_variables if variable not in left_variables]
+            if missing_left:
+                raise PlotSpecError(
+                    f"Annotation '{annotation.key}' requires left-axis variables: {', '.join(missing_left)}"
+                )
 
     for layer in [*spec.left_axis, *([spec.right_axis] if spec.right_axis is not None else [])]:
         if layer.variable not in VARIABLE_REGISTRY:
@@ -860,6 +888,10 @@ def segment_index_columns(segment_key: str) -> tuple[str, str]:
         raise PlotSpecError(f"Unknown semantic segment: {segment_key}")
     if len(segment.qc_columns) != 2:
         raise PlotSpecError(f"Semantic segment '{segment_key}' does not define two QC columns.")
+    if not _segment_is_index_based(segment_key):
+        raise PlotSpecError(
+            f"Semantic segment '{segment_key}' uses value-based QC markers and is not supported by the shared slice/rebase path."
+        )
     start_column, end_column = segment.qc_columns
     return start_column, end_column
 
@@ -1071,17 +1103,30 @@ def _plot_composed_trace_job(
             frame = raw_frame.sort_values(x_col).reset_index(drop=True)
             if frame.empty:
                 continue
+            file_name = str(file_key).strip()
+            if not file_name and "Filename" in frame.columns:
+                file_name = str(frame["Filename"].iloc[0]).strip()
+            file_name = file_name or "<unknown file>"
             qc_row = qc_lookup.get(str(file_key).strip())
             if qc_row is None and "Filename" in frame.columns:
                 qc_row = qc_lookup.get(str(frame["Filename"].iloc[0]).strip())
             if qc_row is None:
+                warnings.append(
+                    f"{job.spec_title}: segment '{job.segment_key}' skipped for {file_name}: missing QC summary row."
+                )
                 continue
             start_idx = _overlay_index(frame, qc_row, start_column)
             if start_idx is None:
+                warnings.append(
+                    f"{job.spec_title}: segment '{job.segment_key}' skipped for {file_name}: missing start marker '{start_column}'."
+                )
                 continue
             try:
                 segment_frame = _slice_trace_to_segment(frame, qc_row, job.segment_key, job.x_label, rebase_x=job.rebase_x)
             except PlotSpecError:
+                warnings.append(
+                    f"{job.spec_title}: segment '{job.segment_key}' skipped for {file_name}: unavailable for this sample."
+                )
                 continue
             segment_frame = segment_frame.copy()
             segment_frame["File"] = frame["File"].iloc[0]
@@ -1092,7 +1137,9 @@ def _plot_composed_trace_job(
             segment_frames.append(segment_frame)
             segment_qc_lookup[str(file_key).strip()] = _rebase_overlay_row(qc_row, start_idx)
         if not segment_frames:
-            raise PlotSpecError(f"segment '{job.segment_key}' is unavailable for this sample")
+            warnings.append(f"{job.spec_title}: segment '{job.segment_key}' is unavailable for all files.")
+            plt.close(fig)
+            return [], warnings
         render_trace_df = pd.concat(segment_frames, ignore_index=True)
         render_qc_lookup = segment_qc_lookup
 
