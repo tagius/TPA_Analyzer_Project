@@ -103,6 +103,27 @@ def test_migrate_custom_graph_specs_promotes_annotation_overlay_to_annotations()
     assert spec.annotations == [CustomGraphAnnotation(kind="annotation", key="hardness_peak1")]
 
 
+def test_migrate_custom_graph_specs_forces_rebase_for_annotation_overlay_with_segment_key() -> None:
+    payload = [
+        {
+            "title": "Legacy Annotation With Segment",
+            "x_domain": "Time (s)",
+            "left_axis": [{"variable": "Force Corrected (N)", "role": "left"}],
+            "segment_key": "b1_start_to_peak1",
+            "overlay": {"kind": "annotation", "key": "hardness_peak1"},
+        }
+    ]
+
+    migrated = migrate_graph_specs(payload)
+
+    spec = migrated[0]
+    assert isinstance(spec, CustomGraphSpec)
+    assert spec.view_domain == "semantic_segment"
+    assert spec.segment_key == "b1_start_to_peak1"
+    assert spec.rebase_x is True
+    assert spec.annotations == [CustomGraphAnnotation(kind="annotation", key="hardness_peak1")]
+
+
 def test_migrate_graph_specs_propagates_unexpected_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     """Unexpected migration failures should not be swallowed."""
     def boom(_: object) -> GraphSpec:

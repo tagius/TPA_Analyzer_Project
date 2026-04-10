@@ -125,6 +125,7 @@ def _migrate_legacy_composed_graph_payload(spec: dict[str, Any]) -> dict[str, An
         migrated["annotations"] = annotations
         if migrated.get("segment_key"):
             migrated["view_domain"] = "semantic_segment"
+            migrated["rebase_x"] = True
         migrated["overlay"] = None
     return migrated
 
