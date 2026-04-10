@@ -446,6 +446,7 @@ class TPAAnalyzerApp(App):
         self.graph_specs: list[GraphSpec | CustomGraphSpec] = []
         self._custom_graph_selected_samples: list[str] = []
         self._syncing_custom_graph_builder = False
+        self._custom_graph_builder_internal_update_counts: dict[str, int] = {}
 
     def compose(self) -> ComposeResult:
         """Compose the full Textual UI."""
@@ -1207,8 +1208,19 @@ class TPAAnalyzerApp(App):
         self._set_status(f"{verb} {filename} ({len(self.selected_file_indices)} selected).")
 
     def action_toggle_highlighted_file_selection(self) -> None:
-        """Keyboard fallback to toggle the currently highlighted file row."""
-        if not self.file_records or not self._widgets_ready():
+        """Keyboard fallback for file-row and plot-builder sample toggles."""
+        if not self._widgets_ready():
+            return
+        sample_list = self.query_one("#custom_graph_sample_list", OptionList)
+        if self.focused is sample_list and sample_list.display and not sample_list.disabled:
+            highlighted = sample_list.highlighted
+            if highlighted is None:
+                return
+            if self._toggle_custom_graph_sample_by_index(int(highlighted)):
+                self._sync_custom_graph_builder_state()
+                self._autosave_session()
+            return
+        if not self.file_records:
             return
         file_table = self.query_one("#file_list", DataTable)
         if self.focused is not file_table:
@@ -1383,9 +1395,12 @@ class TPAAnalyzerApp(App):
         current_value = str(select.value)
         if current_options == options and current_value == value and select.disabled == disabled:
             return
-        select.set_options(options)
         available_values = {option_value for _, option_value in options}
-        select.value = value if value in available_values else options[0][1]
+        next_value = value if value in available_values else options[0][1]
+        if current_value != next_value:
+            self._mark_custom_graph_internal_update(widget_id)
+        select.set_options(options)
+        select.value = next_value
         select.disabled = disabled
 
     def _set_custom_sample_options(self, samples: list[str], selected: list[str]) -> None:
@@ -1430,6 +1445,43 @@ class TPAAnalyzerApp(App):
         """Return the current plot-builder sample selection."""
         available = set(self._available_custom_graph_samples())
         return [sample for sample in self._custom_graph_selected_samples if sample in available]
+
+    def _mark_custom_graph_internal_update(self, widget_id: str | None) -> None:
+        """Suppress the next builder event emitted by an internal widget refresh."""
+        if not widget_id:
+            return
+        widget_id = widget_id.removeprefix("#")
+        self._custom_graph_builder_internal_update_counts[widget_id] = (
+            self._custom_graph_builder_internal_update_counts.get(widget_id, 0) + 1
+        )
+
+    def _consume_custom_graph_internal_update(self, widget_id: str | None) -> bool:
+        """Return ``True`` when a builder event came from an internal refresh."""
+        if not widget_id:
+            return False
+        widget_id = widget_id.removeprefix("#")
+        pending = self._custom_graph_builder_internal_update_counts.get(widget_id, 0)
+        if pending <= 0:
+            return False
+        if pending == 1:
+            self._custom_graph_builder_internal_update_counts.pop(widget_id, None)
+        else:
+            self._custom_graph_builder_internal_update_counts[widget_id] = pending - 1
+        return True
+
+    def _toggle_custom_graph_sample_by_index(self, option_index: int) -> bool:
+        """Toggle one builder sample selection by list index."""
+        samples = self._available_custom_graph_samples()
+        if option_index < 0 or option_index >= len(samples):
+            return False
+        sample = samples[option_index]
+        selected = set(self._selected_custom_graph_samples())
+        if sample in selected:
+            selected.remove(sample)
+        else:
+            selected.add(sample)
+        self._custom_graph_selected_samples = [item for item in samples if item in selected]
+        return True
 
     def _refresh_custom_graph_sample_list(self) -> None:
         """Refresh the dedicated Plot Builder sample list."""
@@ -1860,20 +1912,20 @@ class TPAAnalyzerApp(App):
     @on(Select.Changed, "#select_custom_display_mode")
     def handle_custom_graph_select_changed(self, event: Select.Changed) -> None:
         """Refresh custom graph builder state after a builder select changes."""
-        _ = event
         if self._syncing_custom_graph_builder:
+            return
+        if self._consume_custom_graph_internal_update(event.select.id):
             return
         self._sync_custom_graph_builder_state()
         self._autosave_session()
 
     @on(OptionList.OptionSelected, "#custom_graph_sample_list")
     def handle_custom_graph_sample_selected(self, event: OptionList.OptionSelected) -> None:
-        """Track the currently chosen plot-builder sample."""
+        """Toggle the currently chosen plot-builder sample."""
         if self._syncing_custom_graph_builder:
             return
-        samples = self._available_custom_graph_samples()
-        if 0 <= int(event.option_index) < len(samples):
-            self._custom_graph_selected_samples = [samples[int(event.option_index)]]
+        if not self._toggle_custom_graph_sample_by_index(int(event.option_index)):
+            return
         self._sync_custom_graph_builder_state()
         self._autosave_session()
 

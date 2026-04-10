@@ -210,6 +210,84 @@ def test_segment_selection_triggers_one_autosave_when_builder_is_synchronized(tm
     asyncio.run(scenario())
 
 
+def test_segment_change_triggers_one_autosave_when_builder_repopulates_controls(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        app = TPAAnalyzerApp(settings=AppSettings(default_data_dir=str(tmp_path), session_autosave_enabled=True))
+        autosave_calls = 0
+        original_autosave = app._autosave_session
+
+        def counting_autosave() -> None:
+            nonlocal autosave_calls
+            autosave_calls += 1
+            original_autosave()
+
+        app._autosave_session = counting_autosave  # type: ignore[method-assign]
+
+        async with app.run_test() as pilot:
+            app._apply_analysis_results(
+                pd.DataFrame([{"Filename": "sample.csv", "Group": "Control"}]),
+                pd.DataFrame(
+                    [
+                        {
+                            "File": "sample.csv",
+                            "Filename": "sample.csv",
+                            "Group": "Control",
+                            "Time (s)": 0.0,
+                            "Aligned Time (s)": 0.0,
+                            "Force (N)": 1.0,
+                            "Force Corrected (N)": 1.0,
+                            "Deformation (mm)": 0.1,
+                        }
+                    ]
+                ),
+                pd.DataFrame(
+                    [
+                        {
+                            "Filename": "sample.csv",
+                            "Group": "Control",
+                            "Bite1 Start Index": 0,
+                            "Peak1 Index": 1,
+                            "Bite1 End Index": 2,
+                            "Bite2 Start Index": 3,
+                        }
+                    ]
+                ),
+                {},
+                [],
+                [],
+            )
+            await pilot.pause()
+
+            app.query_one("#select_custom_view_domain", Select).value = "semantic_segment"
+            await pilot.pause()
+
+            force = _checkbox_by_label(app, "Force (N)")
+            force.value = False
+            await pilot.pause()
+
+            force_corrected = _checkbox_by_label(app, "Force Corrected (N)")
+            force_corrected.value = True
+            await pilot.pause()
+
+            segment_select = app.query_one("#select_custom_segment", Select)
+            annotation_select = app.query_one("#select_custom_annotation", Select)
+
+            segment_select.value = "b1_start_to_peak1"
+            await pilot.pause()
+            annotation_select.value = "hardness_peak1"
+            await pilot.pause()
+
+            autosave_calls = 0
+            segment_select.value = "b1_end_to_b2_start"
+            await pilot.pause()
+
+            assert autosave_calls == 1
+            assert str(annotation_select.value) == "__none__"
+            assert _select_values(annotation_select) == ["__none__", "adhesiveness"]
+
+    asyncio.run(scenario())
+
+
 def test_left_axis_checkbox_triggers_one_autosave_when_builder_is_synchronized(tmp_path: Path) -> None:
     async def scenario() -> None:
         app = TPAAnalyzerApp(
@@ -561,6 +639,84 @@ def test_selected_samples_scope_uses_dedicated_plot_builder_list(tmp_path: Path)
             spec = app._collect_graph_spec_from_ui()
             assert spec.data_scope == "selected_samples"
             assert spec.selected_samples == ["sample-a.csv"]
+
+    asyncio.run(scenario())
+
+
+def test_space_toggles_builder_samples_without_touching_grouping_assignments(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        app = _make_app(tmp_path)
+
+        async with app.run_test() as pilot:
+            app.file_records = [
+                {"filename": "sample-a.csv", "group": "Control"},
+                {"filename": "sample-b.csv", "group": "Treatment"},
+            ]
+            initial_groups = [record["group"] for record in app.file_records]
+
+            app._apply_analysis_results(
+                pd.DataFrame(
+                    [
+                        {"Filename": "sample-a.csv", "Group": "Control"},
+                        {"Filename": "sample-b.csv", "Group": "Treatment"},
+                    ]
+                ),
+                pd.DataFrame(
+                    [
+                        {
+                            "File": "sample-a.csv",
+                            "Filename": "sample-a.csv",
+                            "Group": "Control",
+                            "Time (s)": 0.0,
+                            "Aligned Time (s)": 0.0,
+                            "Force (N)": 1.0,
+                            "Force Corrected (N)": 1.0,
+                            "Deformation (mm)": 0.1,
+                        },
+                        {
+                            "File": "sample-b.csv",
+                            "Filename": "sample-b.csv",
+                            "Group": "Treatment",
+                            "Time (s)": 0.0,
+                            "Aligned Time (s)": 0.0,
+                            "Force (N)": 1.2,
+                            "Force Corrected (N)": 1.2,
+                            "Deformation (mm)": 0.2,
+                        },
+                    ]
+                ),
+                pd.DataFrame(
+                    [
+                        {"Filename": "sample-a.csv", "Group": "Control", "Bite1 Start Index": 0, "Peak1 Index": 1},
+                        {"Filename": "sample-b.csv", "Group": "Treatment", "Bite1 Start Index": 0, "Peak1 Index": 1},
+                    ]
+                ),
+                {},
+                [],
+                [],
+            )
+            await pilot.pause()
+
+            data_scope = app.query_one("#select_custom_data_scope", Select)
+            sample_list = app.query_one("#custom_graph_sample_list", OptionList)
+            data_scope.value = "selected_samples"
+            await pilot.pause()
+
+            sample_list.focus()
+            sample_list.highlighted = 0
+            await pilot.pause()
+            await pilot.press("space")
+            await pilot.pause()
+
+            sample_list.highlighted = 1
+            await pilot.pause()
+            await pilot.press("space")
+            await pilot.pause()
+
+            spec = app._collect_graph_spec_from_ui()
+            assert spec.selected_samples == ["sample-a.csv", "sample-b.csv"]
+            assert [record["group"] for record in app.file_records] == initial_groups
+            assert app.selected_file_indices == set()
 
     asyncio.run(scenario())
 
