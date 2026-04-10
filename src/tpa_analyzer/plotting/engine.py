@@ -28,7 +28,6 @@ from tpa_analyzer.core.models import (
 )
 from tpa_analyzer.plotting.custom_graphs import (
     OVERLAY_COMPATIBILITY,
-    left_axis_variables_compatible,
 )
 from tpa_analyzer.plotting.registry import VARIABLE_REGISTRY, axis_label, registry_entry
 
@@ -177,8 +176,6 @@ def validate_composed_graph_spec(spec: CustomGraphSpec) -> None:
 
     if not spec.left_axis:
         raise PlotSpecError("Select at least one left-axis variable.")
-    if not left_axis_variables_compatible([layer.variable for layer in spec.left_axis]):
-        raise PlotSpecError("Left-axis variables must share the same unit.")
 
     for layer in [*spec.left_axis, *([spec.right_axis] if spec.right_axis is not None else [])]:
         if layer.variable not in VARIABLE_REGISTRY:
@@ -227,23 +224,6 @@ def _slugify(value: str) -> str:
     """Return a filename-safe slug for a plot title."""
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", value).strip("_")
     return slug.lower() or "plot"
-
-
-def _allocate_plot_path(
-    output_dir: Path,
-    spec_title: str,
-    x_label: str,
-    allocated_stems: dict[str, int],
-) -> Path:
-    """Return a unique output path for one rendered plot."""
-    stem = f"{_slugify(spec_title)}_{_slugify(x_label)}"
-    next_index = allocated_stems.get(stem, 0) + 1
-    candidate = output_dir / (f"{stem}.png" if next_index == 1 else f"{stem}_{next_index}.png")
-    while candidate.exists():
-        next_index += 1
-        candidate = output_dir / f"{stem}_{next_index}.png"
-    allocated_stems[stem] = next_index
-    return candidate
 
 
 def normalize_graph_spec(spec: GraphSpec | dict[str, Any]) -> GraphSpec:
@@ -690,7 +670,6 @@ def _plot_trace_job(
     style: PlotStyleConfig,
     output_dir: Path,
     figure_config: FigureConfig,
-    allocated_stems: dict[str, int],
     group_order: list[str] | None = None,
 ) -> list[str]:
     """Render one trace-plot job and return saved file paths."""
@@ -745,7 +724,8 @@ def _plot_trace_job(
             axes[0].legend(handles, labels, frameon=False)
 
     fig.tight_layout()
-    path = _allocate_plot_path(output_dir, job.spec_title, job.x_label, allocated_stems)
+    filename = f"{_slugify(job.spec_title)}_{_slugify(job.x_label)}.png"
+    path = output_dir / filename
     fig.savefig(path, dpi=figure_config.dpi, bbox_inches="tight")
     plt.close(fig)
     return [str(path)]
@@ -770,38 +750,19 @@ def _overlay_required_columns(overlay: CustomGraphOverlay) -> tuple[str, ...]:
     return ()
 
 
-def _overlay_qc_file_key(row: pd.Series) -> str:
-    """Return the normalized file key for one QC summary row."""
-    for column in ("Filename", "File"):
-        value = str(row.get(column, "")).strip()
-        if value:
-            return value
-    return ""
-
-
-def _build_overlay_qc_lookup(qc_df: pd.DataFrame | None) -> dict[str, pd.Series]:
-    """Index QC summary rows by filename for composed overlay rendering."""
-    if qc_df is None or qc_df.empty:
-        return {}
-    lookup: dict[str, pd.Series] = {}
-    for _, row in qc_df.iterrows():
-        file_key = _overlay_qc_file_key(row)
-        if file_key and file_key not in lookup:
-            lookup[file_key] = row
-    return lookup
-
-
-def _overlay_value(row: pd.Series | None, column: str) -> Any | None:
-    """Return one QC overlay value from a summary row."""
-    if row is None or column not in row.index:
+def _overlay_value(frame: pd.DataFrame, column: str) -> Any | None:
+    """Return the first non-null overlay value in ``column``."""
+    if column not in frame.columns:
         return None
-    value = row.get(column)
-    return None if pd.isna(value) else value
+    series = frame[column].dropna()
+    if series.empty:
+        return None
+    return series.iloc[0]
 
 
-def _overlay_index(frame: pd.DataFrame, row: pd.Series | None, column: str) -> int | None:
+def _overlay_index(frame: pd.DataFrame, column: str) -> int | None:
     """Return a clamped per-file overlay index."""
-    raw_value = _overlay_value(row, column)
+    raw_value = _overlay_value(frame, column)
     if raw_value is None:
         return None
     try:
@@ -814,14 +775,12 @@ def _overlay_index(frame: pd.DataFrame, row: pd.Series | None, column: str) -> i
 def _render_composed_overlay(
     ax: Any,
     trace_df: pd.DataFrame,
-    qc_lookup: dict[str, pd.Series],
     x_col: str,
     y_col: str,
     overlay: CustomGraphOverlay,
 ) -> str | None:
     """Render a minimal overlay onto the composed figure, or return a warning."""
-    qc_columns = {column for row in qc_lookup.values() for column in row.index}
-    missing_columns = [column for column in _overlay_required_columns(overlay) if column not in qc_columns]
+    missing_columns = [column for column in _overlay_required_columns(overlay) if column not in trace_df.columns]
     if missing_columns:
         return f"overlay '{overlay.key}' skipped: missing columns {', '.join(missing_columns)}"
 
@@ -829,22 +788,17 @@ def _render_composed_overlay(
     overlay_label = overlay_meta.label if overlay_meta is not None else overlay.key
     drawn = False
 
-    for file_key, raw_frame in trace_df.groupby("File", sort=False):
+    for _, raw_frame in trace_df.groupby("File", sort=False):
         frame = raw_frame.sort_values(x_col).reset_index(drop=True)
         if frame.empty:
-            continue
-        qc_row = qc_lookup.get(str(file_key).strip())
-        if qc_row is None and "Filename" in frame.columns:
-            qc_row = qc_lookup.get(str(frame["Filename"].iloc[0]).strip())
-        if qc_row is None:
             continue
         x_vals = frame[x_col].to_numpy(dtype=float)
         y_vals = frame[y_col].to_numpy(dtype=float)
 
         if overlay.key in {"b1_start_to_peak1", "peak1_to_b1_end", "b1_end_to_b2_start", "b2_start_to_peak2"}:
             start_column, end_column = _overlay_required_columns(overlay)
-            start_idx = _overlay_index(frame, qc_row, start_column)
-            end_idx = _overlay_index(frame, qc_row, end_column)
+            start_idx = _overlay_index(frame, start_column)
+            end_idx = _overlay_index(frame, end_column)
             if start_idx is None or end_idx is None:
                 continue
             left, right = sorted((start_idx, end_idx))
@@ -861,7 +815,7 @@ def _render_composed_overlay(
             )
             drawn = True
         elif overlay.key == "hardness_peak1":
-            peak_idx = _overlay_index(frame, qc_row, "Peak1 Index")
+            peak_idx = _overlay_index(frame, "Peak1 Index")
             if peak_idx is None:
                 continue
             ax.scatter(
@@ -882,8 +836,8 @@ def _render_composed_overlay(
             )
             drawn = True
         elif overlay.key == "adhesiveness":
-            start_idx = _overlay_index(frame, qc_row, "Bite1 End Index")
-            end_idx = _overlay_index(frame, qc_row, "Bite2 Start Index")
+            start_idx = _overlay_index(frame, "Bite1 End Index")
+            end_idx = _overlay_index(frame, "Bite2 Start Index")
             if start_idx is None or end_idx is None:
                 continue
             left, right = sorted((start_idx, end_idx))
@@ -906,8 +860,8 @@ def _render_composed_overlay(
             )
             drawn = True
         elif overlay.key == "modulus_window":
-            left_value = _overlay_value(qc_row, "Modulus Strain Min (%)")
-            right_value = _overlay_value(qc_row, "Modulus Strain Max (%)")
+            left_value = _overlay_value(frame, "Modulus Strain Min (%)")
+            right_value = _overlay_value(frame, "Modulus Strain Max (%)")
             if left_value is None or right_value is None:
                 continue
             try:
@@ -954,12 +908,10 @@ def _restore_axis_artist_state(ax: Any, before: dict[str, list[Any]]) -> None:
 
 def _plot_composed_trace_job(
     trace_df: pd.DataFrame,
-    qc_lookup: dict[str, pd.Series],
     job: ResolvedComposedGraphJob,
     style: PlotStyleConfig,
     output_dir: Path,
     figure_config: FigureConfig,
-    allocated_stems: dict[str, int],
     group_order: list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Render one composed trace recipe and return saved paths plus warnings."""
@@ -1001,14 +953,7 @@ def _plot_composed_trace_job(
         overlay_ref_col = _require_column(trace_df, job.left_layers[0].variable)
         overlay_artist_state = _capture_axis_artist_state(ax_left)
         try:
-            overlay_warning = _render_composed_overlay(
-                ax_left,
-                trace_df,
-                qc_lookup,
-                x_col,
-                overlay_ref_col,
-                job.overlay,
-            )
+            overlay_warning = _render_composed_overlay(ax_left, trace_df, x_col, overlay_ref_col, job.overlay)
         except Exception as exc:
             _restore_axis_artist_state(ax_left, overlay_artist_state)
             overlay_warning = str(exc) or f"overlay '{job.overlay.key}' skipped during rendering."
@@ -1030,7 +975,8 @@ def _plot_composed_trace_job(
         ax_left.legend(handles, labels, frameon=False)
 
     fig.tight_layout()
-    path = _allocate_plot_path(output_dir, job.spec_title, job.x_label, allocated_stems)
+    filename = f"{_slugify(job.spec_title)}_{_slugify(job.x_label)}.png"
+    path = output_dir / filename
     fig.savefig(path, dpi=figure_config.dpi, bbox_inches="tight")
     plt.close(fig)
     return [str(path)], warnings
@@ -1042,7 +988,6 @@ def _plot_metric_job(
     style: PlotStyleConfig,
     output_dir: Path,
     figure_config: FigureConfig,
-    allocated_stems: dict[str, int],
     group_order: list[str] | None = None,
     stats_by_metric: dict[str, dict[str, Any]] | None = None,
 ) -> list[str]:
@@ -1089,7 +1034,8 @@ def _plot_metric_job(
             axes[0].legend(handles, labels, frameon=False)
 
     fig.tight_layout()
-    path = _allocate_plot_path(output_dir, job.spec_title, job.x_label, allocated_stems)
+    filename = f"{_slugify(job.spec_title)}_{_slugify(job.x_label)}.png"
+    path = output_dir / filename
     fig.savefig(path, dpi=figure_config.dpi, bbox_inches="tight")
     plt.close(fig)
     return [str(path)]
@@ -1153,8 +1099,6 @@ def plot_custom_graphs(
 
     saved_paths: list[str] = []
     warnings: list[str] = []
-    allocated_stems: dict[str, int] = {}
-    qc_lookup = _build_overlay_qc_lookup(qc_df)
 
     for raw_spec in graph_specs:
         try:
@@ -1175,12 +1119,10 @@ def plot_custom_graphs(
                 try:
                     paths, job_warnings = _plot_composed_trace_job(
                         trace_df=trace_df,
-                        qc_lookup=qc_lookup,
                         job=job,
                         style=style,
                         output_dir=output_root,
                         figure_config=figure_config,
-                        allocated_stems=allocated_stems,
                         group_order=group_order,
                     )
                     saved_paths.extend(paths)
@@ -1205,7 +1147,6 @@ def plot_custom_graphs(
                             style=style,
                             output_dir=output_root,
                             figure_config=figure_config,
-                            allocated_stems=allocated_stems,
                             group_order=group_order,
                         )
                     )
@@ -1217,7 +1158,6 @@ def plot_custom_graphs(
                             style=style,
                             output_dir=output_root,
                             figure_config=figure_config,
-                            allocated_stems=allocated_stems,
                             group_order=group_order,
                             stats_by_metric=stats_by_metric,
                         )
