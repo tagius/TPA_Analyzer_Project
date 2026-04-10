@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 from textual.widgets import Checkbox, OptionList, Select
@@ -284,6 +285,33 @@ def test_segment_change_triggers_one_autosave_when_builder_repopulates_controls(
             assert autosave_calls == 1
             assert str(annotation_select.value) == "__none__"
             assert _select_values(annotation_select) == ["__none__", "adhesiveness"]
+
+    asyncio.run(scenario())
+
+
+def test_generic_select_autosave_guard_consumes_builder_internal_updates(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        app = TPAAnalyzerApp(settings=AppSettings(default_data_dir=str(tmp_path), session_autosave_enabled=True))
+        autosave_calls = 0
+        original_autosave = app._autosave_session
+
+        def counting_autosave() -> None:
+            nonlocal autosave_calls
+            autosave_calls += 1
+            original_autosave()
+
+        app._autosave_session = counting_autosave  # type: ignore[method-assign]
+
+        async with app.run_test() as pilot:
+            segment_select = app.query_one("#select_custom_segment", Select)
+            autosave_calls = 0
+            app._mark_custom_graph_internal_update(segment_select.id)
+
+            app.handle_persistent_select_changed(SimpleNamespace(select=segment_select))
+            await pilot.pause()
+
+            assert autosave_calls == 0
+            assert app._consume_custom_graph_internal_update(segment_select.id) is False
 
     asyncio.run(scenario())
 

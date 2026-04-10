@@ -1469,6 +1469,10 @@ class TPAAnalyzerApp(App):
             self._custom_graph_builder_internal_update_counts[widget_id] = pending - 1
         return True
 
+    def _should_skip_builder_internal_autosave(self, widget_id: str | None) -> bool:
+        """Return whether an autosave-triggering event came from a builder-owned refresh."""
+        return self._consume_custom_graph_internal_update(widget_id)
+
     def _toggle_custom_graph_sample_by_index(self, option_index: int) -> bool:
         """Toggle one builder sample selection by list index."""
         samples = self._available_custom_graph_samples()
@@ -1914,7 +1918,7 @@ class TPAAnalyzerApp(App):
         """Refresh custom graph builder state after a builder select changes."""
         if self._syncing_custom_graph_builder:
             return
-        if self._consume_custom_graph_internal_update(event.select.id):
+        if self._should_skip_builder_internal_autosave(event.select.id):
             return
         self._sync_custom_graph_builder_state()
         self._autosave_session()
@@ -2033,6 +2037,8 @@ class TPAAnalyzerApp(App):
     @on(Select.Changed)
     def handle_persistent_select_changed(self, event: Select.Changed) -> None:
         """Autosave select changes not handled elsewhere."""
+        if self._should_skip_builder_internal_autosave(event.select.id):
+            return
         if event.select.id in {
             "select_custom_view_domain",
             "select_custom_segment",
