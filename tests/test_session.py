@@ -124,6 +124,61 @@ def test_migrate_custom_graph_specs_forces_rebase_for_annotation_overlay_with_se
     assert spec.annotations == [CustomGraphAnnotation(kind="annotation", key="hardness_peak1")]
 
 
+def test_migrate_custom_graph_specs_deduplicates_annotation_overlay() -> None:
+    payload = [
+        {
+            "title": "Legacy Annotation Duplicate",
+            "x_domain": "Time (s)",
+            "left_axis": [{"variable": "Force Corrected (N)", "role": "left"}],
+            "annotations": [{"kind": "annotation", "key": "hardness_peak1"}],
+            "overlay": {"kind": "annotation", "key": "hardness_peak1"},
+        }
+    ]
+
+    migrated = migrate_graph_specs(payload)
+
+    spec = migrated[0]
+    assert isinstance(spec, CustomGraphSpec)
+    assert spec.annotations == [CustomGraphAnnotation(kind="annotation", key="hardness_peak1")]
+
+
+def test_custom_graph_spec_requires_segment_key_for_semantic_segment_domain() -> None:
+    with pytest.raises(ValueError, match="segment_key"):
+        CustomGraphSpec(
+            title="Invalid",
+            x_domain="Time (s)",
+            left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+            view_domain="semantic_segment",
+            rebase_x=True,
+        )
+
+
+def test_custom_graph_spec_requires_rebase_for_semantic_segment_domain() -> None:
+    with pytest.raises(ValueError, match="rebase_x"):
+        CustomGraphSpec(
+            title="Invalid",
+            x_domain="Time (s)",
+            left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+            view_domain="semantic_segment",
+            segment_key="b1_start_to_peak1",
+            rebase_x=False,
+        )
+
+
+def test_migrate_graph_specs_rejects_malformed_selected_samples_payload() -> None:
+    with pytest.raises(SessionError, match="invalid graph spec payload"):
+        migrate_graph_specs(
+            [
+                {
+                    "title": "Malformed Selected Samples",
+                    "x_domain": "Time (s)",
+                    "left_axis": [{"variable": "Force Corrected (N)", "role": "left"}],
+                    "selected_samples": "oops",
+                }
+            ]
+        )
+
+
 def test_migrate_graph_specs_propagates_unexpected_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     """Unexpected migration failures should not be swallowed."""
     def boom(_: object) -> GraphSpec:
