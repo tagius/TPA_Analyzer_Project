@@ -39,6 +39,96 @@ def test_overlay_control_disabled_before_analysis(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_overlay_options_enable_after_analysis_results_are_applied(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        app = _make_app(tmp_path)
+
+        async with app.run_test() as pilot:
+            overlay_select = app.query_one("#select_custom_overlay", Select)
+            assert overlay_select.disabled is True
+            assert _select_values(overlay_select) == ["__none__"]
+
+            app._apply_analysis_results(
+                pd.DataFrame([{"Filename": "sample.csv", "Group": "Control"}]),
+                pd.DataFrame(
+                    [
+                        {
+                            "File": "sample.csv",
+                            "Filename": "sample.csv",
+                            "Group": "Control",
+                            "Time (s)": 0.0,
+                            "Aligned Time (s)": 0.0,
+                            "Force (N)": 1.0,
+                            "Force Corrected (N)": 1.0,
+                            "Deformation (mm)": 0.1,
+                        }
+                    ]
+                ),
+                pd.DataFrame(),
+                {},
+                [],
+                [],
+            )
+            await pilot.pause()
+
+            force_corrected = _checkbox_by_label(app, "Force Corrected (N)")
+            force_corrected.value = True
+            await pilot.pause()
+
+            overlay_select = app.query_one("#select_custom_overlay", Select)
+            assert overlay_select.disabled is False
+            assert "b1_start_to_peak1" in _select_values(overlay_select)
+
+    asyncio.run(scenario())
+
+
+def test_overlay_options_reset_when_grouping_change_invalidates_analysis_results(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        app = _make_app(tmp_path)
+
+        async with app.run_test() as pilot:
+            app._apply_analysis_results(
+                pd.DataFrame([{"Filename": "sample.csv", "Group": "Control"}]),
+                pd.DataFrame(
+                    [
+                        {
+                            "File": "sample.csv",
+                            "Filename": "sample.csv",
+                            "Group": "Control",
+                            "Time (s)": 0.0,
+                            "Aligned Time (s)": 0.0,
+                            "Force (N)": 1.0,
+                            "Force Corrected (N)": 1.0,
+                            "Deformation (mm)": 0.1,
+                        }
+                    ]
+                ),
+                pd.DataFrame(),
+                {},
+                [],
+                [],
+            )
+            await pilot.pause()
+
+            force_corrected = _checkbox_by_label(app, "Force Corrected (N)")
+            force_corrected.value = True
+            await pilot.pause()
+
+            overlay_select = app.query_one("#select_custom_overlay", Select)
+            assert overlay_select.disabled is False
+            assert "b1_start_to_peak1" in _select_values(overlay_select)
+
+            invalidated = app._invalidate_analysis_results_for_grouping_change()
+            await pilot.pause()
+
+            overlay_select = app.query_one("#select_custom_overlay", Select)
+            assert invalidated is True
+            assert overlay_select.disabled is True
+            assert _select_values(overlay_select) == ["__none__"]
+
+    asyncio.run(scenario())
+
+
 def test_right_axis_options_update_when_left_axis_selection_changes(tmp_path: Path) -> None:
     async def scenario() -> None:
         app = _make_app(tmp_path)

@@ -675,6 +675,7 @@ class TPAAnalyzerApp(App):
         self.qc_df = pd.DataFrame()
         self.stats_results = {}
         self._rebuild_results_table()
+        self._sync_custom_graph_builder_state()
         self._log("Grouping changed. Run analysis again before exporting.")
         return True
 

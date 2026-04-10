@@ -187,6 +187,102 @@ def test_plot_custom_graphs_warns_when_composed_overlay_prereqs_are_missing(tmp_
     assert "missing" in payload["warnings"][0].lower()
 
 
+def test_plot_custom_graphs_overlay_warning_does_not_abort_other_specs(tmp_path) -> None:
+    """Missing overlay prereqs should warn for that spec and still export other specs."""
+    trace_df = pd.DataFrame(
+        [
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 0.0, "Force Corrected (N)": 1.0, "Force (N)": 1.0},
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 0.5, "Force Corrected (N)": 2.0, "Force (N)": 2.0},
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 1.0, "Force Corrected (N)": 1.5, "Force (N)": 1.5},
+        ]
+    )
+    overlay_spec = CustomGraphSpec(
+        title="Overlay Missing",
+        x_domain="Time (s)",
+        left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+        overlay=CustomGraphOverlay(kind="segment", key="b1_start_to_peak1"),
+    )
+    valid_spec = CustomGraphSpec(
+        title="Plain Trace",
+        x_domain="Time (s)",
+        left_axis=[CustomGraphAxisLayer(variable="Force (N)", role="left")],
+    )
+
+    payload = plot_custom_graphs(
+        trace_df=trace_df,
+        metrics_df=pd.DataFrame(),
+        graph_specs=[overlay_spec, valid_spec],
+        style=PlotStyleConfig(),
+        output_dir=tmp_path,
+        figure_config=FigureConfig(dpi=72),
+        group_order=["Control"],
+    )
+
+    assert len(payload["paths"]) == 2
+    assert all(Path(path).exists() for path in payload["paths"])
+    assert len(payload["warnings"]) == 1
+    assert "Overlay Missing" in payload["warnings"][0]
+    assert "overlay" in payload["warnings"][0].lower()
+
+
+def test_plot_custom_graphs_overlay_render_failure_warns_and_still_saves_plot(tmp_path, monkeypatch) -> None:
+    """Overlay render failures should roll back partial overlay artists before saving."""
+    trace_df = pd.DataFrame(
+        [
+            {
+                "File": "a.csv",
+                "Filename": "a.csv",
+                "Group": "Control",
+                "Time (s)": 0.0,
+                "Force Corrected (N)": 1.0,
+                "Bite1 Start Index": 0,
+                "Peak1 Index": 0,
+            },
+            {
+                "File": "a.csv",
+                "Filename": "a.csv",
+                "Group": "Control",
+                "Time (s)": 0.5,
+                "Force Corrected (N)": 2.0,
+                "Bite1 Start Index": 0,
+                "Peak1 Index": 1,
+            },
+        ]
+    )
+    spec = CustomGraphSpec(
+        title="Overlay Explodes",
+        x_domain="Time (s)",
+        left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+        overlay=CustomGraphOverlay(kind="segment", key="b1_start_to_peak1"),
+    )
+    captured_axes: list[object] = []
+
+    def boom(ax, *args, **kwargs):
+        captured_axes.append(ax)
+        ax.plot([0.0, 0.5], [1.0, 1.5], color="#ff00ff", label="Partial Overlay Artifact")
+        raise PlotSpecError("overlay exploded")
+
+    monkeypatch.setattr("tpa_analyzer.plotting.engine._render_composed_overlay", boom)
+
+    payload = plot_custom_graphs(
+        trace_df=trace_df,
+        metrics_df=pd.DataFrame(),
+        graph_specs=[spec],
+        style=PlotStyleConfig(),
+        output_dir=tmp_path,
+        figure_config=FigureConfig(dpi=72),
+        group_order=["Control"],
+    )
+
+    assert len(payload["paths"]) == 1
+    assert Path(payload["paths"][0]).exists()
+    assert len(payload["warnings"]) == 1
+    assert "Overlay Explodes" in payload["warnings"][0]
+    assert "overlay exploded" in payload["warnings"][0].lower()
+    assert len(captured_axes) == 1
+    assert all(line.get_label() != "Partial Overlay Artifact" for line in captured_axes[0].lines)
+
+
 def test_export_plot_bundle_warns_instead_of_aborting_when_trace_exports_are_unavailable(tmp_path) -> None:
     """Batch plot export should degrade to warnings when trace plots cannot render."""
     warnings = export_plot_bundle(

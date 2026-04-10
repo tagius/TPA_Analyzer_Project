@@ -852,6 +852,27 @@ def _render_composed_overlay(
     return None
 
 
+def _capture_axis_artist_state(ax: Any) -> dict[str, list[Any]]:
+    """Capture the current artist collections for rollback after overlay failures."""
+    return {
+        "artists": list(ax.artists),
+        "collections": list(ax.collections),
+        "lines": list(ax.lines),
+        "patches": list(ax.patches),
+        "texts": list(ax.texts),
+    }
+
+
+def _restore_axis_artist_state(ax: Any, before: dict[str, list[Any]]) -> None:
+    """Remove artists added after ``before`` was captured."""
+    for attribute, original_items in before.items():
+        original_ids = {id(item) for item in original_items}
+        for item in list(getattr(ax, attribute)):
+            if id(item) in original_ids:
+                continue
+            item.remove()
+
+
 def _plot_composed_trace_job(
     trace_df: pd.DataFrame,
     job: ResolvedComposedGraphJob,
@@ -897,7 +918,12 @@ def _plot_composed_trace_job(
 
     if job.overlay is not None and job.left_layers:
         overlay_ref_col = _require_column(trace_df, job.left_layers[0].variable)
-        overlay_warning = _render_composed_overlay(ax_left, trace_df, x_col, overlay_ref_col, job.overlay)
+        overlay_artist_state = _capture_axis_artist_state(ax_left)
+        try:
+            overlay_warning = _render_composed_overlay(ax_left, trace_df, x_col, overlay_ref_col, job.overlay)
+        except Exception as exc:
+            _restore_axis_artist_state(ax_left, overlay_artist_state)
+            overlay_warning = str(exc) or f"overlay '{job.overlay.key}' skipped during rendering."
         if overlay_warning is not None:
             warnings.append(f"{job.spec_title}: {overlay_warning}")
 
