@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from matplotlib.figure import Figure
 import pandas as pd
 import pytest
 
 from tpa_analyzer.core.errors import PlotSpecError
 from tpa_analyzer.core.exporting import export_plot_bundle
 from tpa_analyzer.core.models import (
+    CustomGraphAnnotation,
     CustomGraphAxisLayer,
     CustomGraphOverlay,
     CustomGraphSpec,
@@ -17,6 +19,7 @@ from tpa_analyzer.core.models import (
     GraphSpec,
     PlotStyleConfig,
 )
+from tpa_analyzer.plotting import engine as plotting_engine
 from tpa_analyzer.plotting.engine import (
     expand_composed_graph_spec,
     expand_graph_spec_jobs,
@@ -26,6 +29,31 @@ from tpa_analyzer.plotting.engine import (
 )
 from tpa_analyzer.core.session import migrate_graph_specs
 from tpa_analyzer.ui.app import filter_assigned_plot_export_payload
+
+
+def _semantic_segment_trace_payload() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build a small trace/QC payload with two samples and one shared segment."""
+    trace_df = pd.DataFrame(
+        [
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 0.0, "Force Corrected (N)": 0.5},
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 0.5, "Force Corrected (N)": 1.1},
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 1.0, "Force Corrected (N)": 2.0},
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 1.5, "Force Corrected (N)": 1.4},
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 2.0, "Force Corrected (N)": 0.8},
+            {"File": "b.csv", "Filename": "b.csv", "Group": "Treatment", "Time (s)": 0.0, "Force Corrected (N)": 0.6},
+            {"File": "b.csv", "Filename": "b.csv", "Group": "Treatment", "Time (s)": 0.5, "Force Corrected (N)": 1.0},
+            {"File": "b.csv", "Filename": "b.csv", "Group": "Treatment", "Time (s)": 1.0, "Force Corrected (N)": 1.8},
+            {"File": "b.csv", "Filename": "b.csv", "Group": "Treatment", "Time (s)": 1.5, "Force Corrected (N)": 1.2},
+            {"File": "b.csv", "Filename": "b.csv", "Group": "Treatment", "Time (s)": 2.0, "Force Corrected (N)": 0.7},
+        ]
+    )
+    qc_df = pd.DataFrame(
+        [
+            {"Filename": "a.csv", "Group": "Control", "Bite1 Start Index": 1, "Peak1 Index": 3},
+            {"Filename": "b.csv", "Group": "Treatment", "Bite1 Start Index": 1, "Peak1 Index": 3},
+        ]
+    )
+    return trace_df, qc_df
 
 
 def test_expand_graph_spec_jobs_creates_one_job_per_x_axis() -> None:
@@ -585,3 +613,147 @@ def test_plot_custom_graphs_warns_for_none_payload_and_continues(tmp_path) -> No
     assert Path(payload["paths"][0]).exists()
     assert len(payload["warnings"]) == 1
     assert "invalid" in payload["warnings"][0].lower()
+
+
+def test_plot_custom_graphs_renders_grouped_semantic_segment_graph(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Grouped semantic-segment exports should slice traces, keep overlays, and render annotations as markers."""
+    trace_df, qc_df = _semantic_segment_trace_payload()
+    spec = CustomGraphSpec(
+        title="Grouped Segment",
+        x_domain="Time (s)",
+        left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+        view_domain="semantic_segment",
+        segment_key="b1_start_to_peak1",
+        rebase_x=True,
+        annotations=[CustomGraphAnnotation(kind="annotation", key="hardness_peak1")],
+        overlay=CustomGraphOverlay(kind="segment", key="b1_start_to_peak1"),
+        data_scope="grouped",
+    )
+    original_slice = plotting_engine._slice_trace_to_segment
+    slice_calls: list[str] = []
+    saved_figures: list[Figure] = []
+
+    def tracking_slice(frame, qc_row, segment_key, x_label, *, rebase_x):
+        slice_calls.append(str(frame["Filename"].iloc[0]))
+        return original_slice(frame, qc_row, segment_key, x_label, rebase_x=rebase_x)
+
+    def capture_savefig(self, *args, **kwargs):
+        saved_figures.append(self)
+
+    monkeypatch.setattr(plotting_engine, "_slice_trace_to_segment", tracking_slice)
+    monkeypatch.setattr(Figure, "savefig", capture_savefig)
+
+    payload = plot_custom_graphs(
+        trace_df=trace_df,
+        metrics_df=pd.DataFrame(),
+        qc_df=qc_df,
+        graph_specs=[spec],
+        style=PlotStyleConfig(),
+        output_dir=tmp_path,
+        figure_config=FigureConfig(dpi=72),
+        group_order=["Control", "Treatment"],
+    )
+
+    assert len(payload["paths"]) == 1
+    assert payload["warnings"] == []
+    assert slice_calls == ["a.csv", "b.csv"]
+    assert len(saved_figures) == 1
+
+    ax = saved_figures[0].axes[0]
+    assert len(ax.patches) == 0
+    assert any(text.get_text() == "Hardness at Peak1" for text in ax.texts)
+    assert any(line.get_xdata()[0] == pytest.approx(0.0) for line in ax.lines if len(line.get_xdata()))
+
+
+def test_plot_custom_graphs_renders_selected_sample_segment_graph_as_one_stacked_figure(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Selected-sample stacked exports should slice each sample and save one multi-panel figure."""
+    trace_df, qc_df = _semantic_segment_trace_payload()
+    spec = CustomGraphSpec(
+        title="Stacked Segment",
+        x_domain="Time (s)",
+        left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+        view_domain="semantic_segment",
+        segment_key="b1_start_to_peak1",
+        rebase_x=True,
+        data_scope="selected_samples",
+        selected_samples=["a.csv", "b.csv"],
+        display_mode="stacked",
+    )
+    original_slice = plotting_engine._slice_trace_to_segment
+    slice_calls: list[str] = []
+    saved_figures: list[Figure] = []
+
+    def tracking_slice(frame, qc_row, segment_key, x_label, *, rebase_x):
+        slice_calls.append(str(frame["Filename"].iloc[0]))
+        return original_slice(frame, qc_row, segment_key, x_label, rebase_x=rebase_x)
+
+    def capture_savefig(self, *args, **kwargs):
+        saved_figures.append(self)
+
+    monkeypatch.setattr(plotting_engine, "_slice_trace_to_segment", tracking_slice)
+    monkeypatch.setattr(Figure, "savefig", capture_savefig)
+
+    payload = plot_custom_graphs(
+        trace_df=trace_df,
+        metrics_df=pd.DataFrame(),
+        qc_df=qc_df,
+        graph_specs=[spec],
+        style=PlotStyleConfig(),
+        output_dir=tmp_path,
+        figure_config=FigureConfig(dpi=72),
+        group_order=["Control", "Treatment"],
+    )
+
+    assert len(payload["paths"]) == 1
+    assert payload["warnings"] == []
+    assert slice_calls == ["a.csv", "b.csv"]
+    assert len(saved_figures) == 1
+    assert len(saved_figures[0].axes) == 2
+
+    x_limits = [tuple(axis.get_xlim()) for axis in saved_figures[0].axes]
+    assert x_limits[0] == pytest.approx(x_limits[1])
+
+
+def test_plot_custom_graphs_selected_sample_individual_skips_missing_marker_sample_with_warning(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Individual selected-sample exports should warn for invalid samples and still save valid ones."""
+    trace_df, qc_df = _semantic_segment_trace_payload()
+    qc_df.loc[qc_df["Filename"] == "b.csv", "Bite1 Start Index"] = pd.NA
+    spec = CustomGraphSpec(
+        title="Individual Segment",
+        x_domain="Time (s)",
+        left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+        view_domain="semantic_segment",
+        segment_key="b1_start_to_peak1",
+        rebase_x=True,
+        data_scope="selected_samples",
+        selected_samples=["a.csv", "b.csv"],
+        display_mode="individual",
+    )
+    saved_figures: list[Figure] = []
+
+    def capture_savefig(self, *args, **kwargs):
+        saved_figures.append(self)
+
+    monkeypatch.setattr(Figure, "savefig", capture_savefig)
+
+    payload = plot_custom_graphs(
+        trace_df=trace_df,
+        metrics_df=pd.DataFrame(),
+        qc_df=qc_df,
+        graph_specs=[spec],
+        style=PlotStyleConfig(),
+        output_dir=tmp_path,
+        figure_config=FigureConfig(dpi=72),
+        group_order=["Control", "Treatment"],
+    )
+
+    assert len(payload["paths"]) == 1
+    assert len(saved_figures) == 1
+    assert len(payload["warnings"]) == 1
+    assert "Individual Segment" in payload["warnings"][0]
+    assert "b.csv" in payload["warnings"][0]
+    assert "Bite1 Start Index" in payload["warnings"][0]

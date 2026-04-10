@@ -170,8 +170,6 @@ def _effective_composed_overlays(spec: CustomGraphSpec) -> list[CustomGraphOverl
     if spec.overlay is not None:
         overlays.append(spec.overlay)
 
-    overlays.extend(CustomGraphOverlay(kind=annotation.kind, key=annotation.key) for annotation in spec.annotations)
-
     deduped: list[CustomGraphOverlay] = []
     seen: set[tuple[str, str]] = set()
     for overlay in overlays:
@@ -926,14 +924,200 @@ def _slice_trace_to_segment(
     start_column, end_column = segment_index_columns(segment_key)
     start_idx = _overlay_index(frame, qc_row, start_column)
     end_idx = _overlay_index(frame, qc_row, end_column)
-    if start_idx is None or end_idx is None or end_idx < start_idx:
-        raise PlotSpecError(f"segment '{segment_key}' is unavailable for this sample")
+    if start_idx is None:
+        raise PlotSpecError(f"missing marker '{start_column}'")
+    if end_idx is None:
+        raise PlotSpecError(f"missing marker '{end_column}'")
+    if end_idx < start_idx:
+        raise PlotSpecError("end marker precedes start marker")
 
     sliced = frame.iloc[start_idx : end_idx + 1].copy()
     x_col = _require_column(sliced, x_label)
     if rebase_x and not sliced.empty:
         sliced[x_col] = (sliced[x_col].astype(float) - float(sliced[x_col].iloc[0])).round(10)
     return sliced
+
+
+def _resolve_frame_file_name(file_key: Any, frame: pd.DataFrame) -> str:
+    """Return the best available sample name for one trace frame."""
+    file_name = str(file_key).strip()
+    if not file_name and "Filename" in frame.columns:
+        file_name = str(frame["Filename"].iloc[0]).strip()
+    if not file_name and "File" in frame.columns:
+        file_name = str(frame["File"].iloc[0]).strip()
+    return file_name or "<unknown file>"
+
+
+def _resolve_qc_row(file_key: Any, frame: pd.DataFrame, qc_lookup: dict[str, pd.Series]) -> pd.Series | None:
+    """Look up the QC summary row for one trace frame."""
+    qc_row = qc_lookup.get(str(file_key).strip())
+    if qc_row is None and "Filename" in frame.columns:
+        qc_row = qc_lookup.get(str(frame["Filename"].iloc[0]).strip())
+    if qc_row is None and "File" in frame.columns:
+        qc_row = qc_lookup.get(str(frame["File"].iloc[0]).strip())
+    return qc_row
+
+
+def _prepare_segment_frame(
+    frame: pd.DataFrame,
+    file_key: Any,
+    qc_lookup: dict[str, pd.Series],
+    job: ResolvedComposedGraphJob,
+) -> tuple[pd.DataFrame | None, pd.Series | None, str | None]:
+    """Slice one frame to the selected segment and rebase QC markers when needed."""
+    file_name = _resolve_frame_file_name(file_key, frame)
+    qc_row = _resolve_qc_row(file_key, frame, qc_lookup)
+    if qc_row is None:
+        return None, None, f"{job.spec_title}: segment '{job.segment_key}' skipped for {file_name}: missing QC summary row."
+
+    try:
+        prepared_frame = _slice_trace_to_segment(frame, qc_row, job.segment_key or "", job.x_label, rebase_x=job.rebase_x)
+    except PlotSpecError as exc:
+        return None, None, f"{job.spec_title}: segment '{job.segment_key}' skipped for {file_name}: {exc}."
+
+    prepared_qc_row = qc_row
+    if job.segment_key and job.rebase_x:
+        start_column, _ = segment_index_columns(job.segment_key)
+        start_idx = _overlay_index(frame, qc_row, start_column)
+        prepared_qc_row = _rebase_overlay_row(qc_row, start_idx or 0)
+    return prepared_frame, prepared_qc_row, None
+
+
+def _prepare_grouped_trace_data(
+    trace_df: pd.DataFrame,
+    qc_lookup: dict[str, pd.Series],
+    job: ResolvedComposedGraphJob,
+    x_col: str,
+) -> tuple[pd.DataFrame, dict[str, pd.Series], list[str]]:
+    """Return grouped render data, slicing to one semantic segment when requested."""
+    if not job.segment_key:
+        return trace_df, qc_lookup, []
+
+    warnings: list[str] = []
+    segment_frames: list[pd.DataFrame] = []
+    segment_qc_lookup: dict[str, pd.Series] = {}
+    for file_key, raw_frame in trace_df.groupby("File", sort=False):
+        frame = raw_frame.sort_values(x_col).reset_index(drop=True)
+        if frame.empty:
+            continue
+        prepared_frame, prepared_qc_row, warning = _prepare_segment_frame(frame, file_key, qc_lookup, job)
+        if warning is not None:
+            warnings.append(warning)
+            continue
+        assert prepared_frame is not None and prepared_qc_row is not None
+        prepared_frame = prepared_frame.copy()
+        prepared_frame["File"] = frame["File"].iloc[0]
+        if "Filename" in frame.columns:
+            prepared_frame["Filename"] = frame["Filename"].iloc[0]
+        if "Group" in frame.columns:
+            prepared_frame["Group"] = frame["Group"].iloc[0]
+        segment_frames.append(prepared_frame)
+        segment_qc_lookup[_resolve_frame_file_name(file_key, frame)] = prepared_qc_row
+
+    if not segment_frames:
+        raise PlotSpecError(f"{job.spec_title}: segment '{job.segment_key}' is unavailable for all files.")
+    return pd.concat(segment_frames, ignore_index=True), segment_qc_lookup, warnings
+
+
+def _prepare_selected_sample_data(
+    trace_df: pd.DataFrame,
+    qc_lookup: dict[str, pd.Series],
+    job: ResolvedComposedGraphJob,
+    x_col: str,
+) -> tuple[list[tuple[str, pd.DataFrame, pd.Series | None]], list[str]]:
+    """Return one prepared frame per selected sample."""
+    warnings: list[str] = []
+    prepared_samples: list[tuple[str, pd.DataFrame, pd.Series | None]] = []
+    filename_mask_source = (
+        trace_df["Filename"].astype(str)
+        if "Filename" in trace_df.columns
+        else pd.Series("", index=trace_df.index, dtype=str)
+    )
+
+    for sample_name in job.selected_samples:
+        sample_frame = trace_df[trace_df["File"].astype(str).eq(sample_name) | filename_mask_source.eq(sample_name)].copy()
+        if sample_frame.empty:
+            warnings.append(f"{job.spec_title}: selected sample '{sample_name}' skipped: missing trace rows.")
+            continue
+
+        sample_frame = sample_frame.sort_values(x_col).reset_index(drop=True)
+        sample_qc_row: pd.Series | None = _resolve_qc_row(sample_name, sample_frame, qc_lookup)
+        if job.segment_key:
+            prepared_frame, prepared_qc_row, warning = _prepare_segment_frame(sample_frame, sample_name, qc_lookup, job)
+            if warning is not None:
+                warnings.append(warning)
+                continue
+            assert prepared_frame is not None
+            sample_frame = prepared_frame
+            sample_qc_row = prepared_qc_row
+
+        sample_frame = sample_frame.copy()
+        sample_frame["File"] = sample_name
+        if "Filename" in sample_frame.columns:
+            sample_frame["Filename"] = sample_name
+        prepared_samples.append((sample_name, sample_frame, sample_qc_row))
+
+    return prepared_samples, warnings
+
+
+def _render_composed_annotations(
+    ax: Any,
+    trace_df: pd.DataFrame,
+    qc_lookup: dict[str, pd.Series],
+    x_col: str,
+    y_col: str,
+    annotations: list[CustomGraphAnnotation],
+) -> list[str]:
+    """Render semantic annotations as markers and labels only."""
+    warnings: list[str] = []
+    for annotation in annotations:
+        annotation_meta = ANNOTATION_COMPATIBILITY.get(annotation.key)
+        if annotation_meta is None:
+            warnings.append(f"annotation '{annotation.key}' skipped: unknown annotation.")
+            continue
+
+        drawn = False
+        for file_key, raw_frame in trace_df.groupby("File", sort=False):
+            frame = raw_frame.sort_values(x_col).reset_index(drop=True)
+            if frame.empty:
+                continue
+            qc_row = _resolve_qc_row(file_key, frame, qc_lookup)
+            if qc_row is None:
+                continue
+            x_vals = frame[x_col].to_numpy(dtype=float)
+            y_vals = frame[y_col].to_numpy(dtype=float)
+
+            columns = _overlay_required_columns(CustomGraphOverlay(kind="annotation", key=annotation.key))
+            if not columns:
+                continue
+
+            marker_points: list[tuple[float, float]] = []
+            for column in columns:
+                marker_idx = _overlay_index(frame, qc_row, column)
+                if marker_idx is None:
+                    marker_points = []
+                    break
+                marker_points.append((x_vals[marker_idx], y_vals[marker_idx]))
+            if not marker_points:
+                continue
+
+            xs = [point[0] for point in marker_points]
+            ys = [point[1] for point in marker_points]
+            ax.scatter(xs, ys, color="#7C2D12", s=26, zorder=5, label=annotation_meta.label if not drawn else "")
+            anchor_idx = int(np.argmax(xs))
+            ax.annotate(
+                annotation_meta.label,
+                (xs[anchor_idx], ys[anchor_idx]),
+                textcoords="offset points",
+                xytext=(5, 6),
+                fontsize=8,
+                color="#7C2D12",
+            )
+            drawn = True
+
+        if not drawn:
+            warnings.append(f"annotation '{annotation.key}' skipped: required QC values were unavailable.")
+    return warnings
 
 
 def _render_composed_overlay(
@@ -1089,60 +1273,42 @@ def _plot_composed_trace_job(
 ) -> tuple[list[str], list[str]]:
     """Render one composed trace recipe and return saved paths plus warnings."""
     x_col = _require_column(trace_df, job.x_label)
-    fig, ax_left = plt.subplots(1, 1, figsize=figure_config.resolve_size())
-    ax_right = None
+    if job.data_scope == "selected_samples":
+        return _plot_selected_sample_trace_job(
+            trace_df=trace_df,
+            qc_lookup=qc_lookup,
+            job=job,
+            style=style,
+            output_dir=output_dir,
+            figure_config=figure_config,
+            allocated_stems=allocated_stems,
+            group_order=group_order,
+        )
+
+    render_trace_df, render_qc_lookup, warnings = _prepare_grouped_trace_data(trace_df, qc_lookup, job, x_col)
+    return _render_composed_trace_figure(
+        render_trace_df=render_trace_df,
+        render_qc_lookup=render_qc_lookup,
+        job=job,
+        style=style,
+        output_dir=output_dir,
+        figure_config=figure_config,
+        allocated_stems=allocated_stems,
+        group_order=group_order,
+        warnings=warnings,
+    )
+
+
+def _render_composed_trace_axis(
+    ax_left: Any,
+    render_trace_df: pd.DataFrame,
+    render_qc_lookup: dict[str, pd.Series],
+    job: ResolvedComposedGraphJob,
+    style: PlotStyleConfig,
+    group_order: list[str] | None,
+) -> tuple[Any | None, list[str]]:
+    """Render one composed trace payload on a provided axis."""
     warnings: list[str] = []
-    render_trace_df = trace_df
-    render_qc_lookup = qc_lookup
-
-    if job.segment_key and job.rebase_x:
-        segment_frames: list[pd.DataFrame] = []
-        segment_qc_lookup: dict[str, pd.Series] = {}
-        start_column, _ = segment_index_columns(job.segment_key)
-        for file_key, raw_frame in trace_df.groupby("File", sort=False):
-            frame = raw_frame.sort_values(x_col).reset_index(drop=True)
-            if frame.empty:
-                continue
-            file_name = str(file_key).strip()
-            if not file_name and "Filename" in frame.columns:
-                file_name = str(frame["Filename"].iloc[0]).strip()
-            file_name = file_name or "<unknown file>"
-            qc_row = qc_lookup.get(str(file_key).strip())
-            if qc_row is None and "Filename" in frame.columns:
-                qc_row = qc_lookup.get(str(frame["Filename"].iloc[0]).strip())
-            if qc_row is None:
-                warnings.append(
-                    f"{job.spec_title}: segment '{job.segment_key}' skipped for {file_name}: missing QC summary row."
-                )
-                continue
-            start_idx = _overlay_index(frame, qc_row, start_column)
-            if start_idx is None:
-                warnings.append(
-                    f"{job.spec_title}: segment '{job.segment_key}' skipped for {file_name}: missing start marker '{start_column}'."
-                )
-                continue
-            try:
-                segment_frame = _slice_trace_to_segment(frame, qc_row, job.segment_key, job.x_label, rebase_x=job.rebase_x)
-            except PlotSpecError:
-                warnings.append(
-                    f"{job.spec_title}: segment '{job.segment_key}' skipped for {file_name}: unavailable for this sample."
-                )
-                continue
-            segment_frame = segment_frame.copy()
-            segment_frame["File"] = frame["File"].iloc[0]
-            if "Filename" in frame.columns:
-                segment_frame["Filename"] = frame["Filename"].iloc[0]
-            if "Group" in frame.columns:
-                segment_frame["Group"] = frame["Group"].iloc[0]
-            segment_frames.append(segment_frame)
-            segment_qc_lookup[str(file_key).strip()] = _rebase_overlay_row(qc_row, start_idx)
-        if not segment_frames:
-            warnings.append(f"{job.spec_title}: segment '{job.segment_key}' is unavailable for all files.")
-            plt.close(fig)
-            return [], warnings
-        render_trace_df = pd.concat(segment_frames, ignore_index=True)
-        render_qc_lookup = segment_qc_lookup
-
     x_col = _require_column(render_trace_df, job.x_label)
 
     for layer in job.left_layers:
@@ -1158,6 +1324,7 @@ def _plot_composed_trace_job(
             group_order=group_order,
         )
 
+    ax_right = None
     if job.right_layer is not None:
         right_col = _require_column(render_trace_df, job.right_layer.variable)
         ax_right = ax_left.twinx()
@@ -1193,6 +1360,45 @@ def _plot_composed_trace_job(
             if overlay_warning is not None:
                 warnings.append(f"{job.spec_title}: {overlay_warning}")
 
+    if job.annotations and job.left_layers:
+        annotation_ref_col = _require_column(render_trace_df, job.left_layers[0].variable)
+        for annotation_warning in _render_composed_annotations(
+            ax_left,
+            render_trace_df,
+            render_qc_lookup,
+            x_col,
+            annotation_ref_col,
+            job.annotations,
+        ):
+            warnings.append(f"{job.spec_title}: {annotation_warning}")
+
+    return ax_right, warnings
+
+
+def _render_composed_trace_figure(
+    render_trace_df: pd.DataFrame,
+    render_qc_lookup: dict[str, pd.Series],
+    job: ResolvedComposedGraphJob,
+    style: PlotStyleConfig,
+    output_dir: Path,
+    figure_config: FigureConfig,
+    allocated_stems: dict[str, int],
+    group_order: list[str] | None,
+    warnings: list[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Render one grouped composed figure and save it."""
+    fig, ax_left = plt.subplots(1, 1, figsize=figure_config.resolve_size())
+    warnings = list(warnings or [])
+    ax_right, render_warnings = _render_composed_trace_axis(
+        ax_left,
+        render_trace_df,
+        render_qc_lookup,
+        job,
+        style,
+        group_order,
+    )
+    warnings.extend(render_warnings)
+
     ax_left.set_xlabel(axis_label(job.x_label))
     ax_left.set_ylabel(" / ".join(axis_label(layer.variable) for layer in job.left_layers))
     ax_left.set_title(f"{job.spec_title} [{job.x_label}]")
@@ -1207,6 +1413,87 @@ def _plot_composed_trace_job(
     if handles:
         ax_left.legend(handles, labels, frameon=False)
 
+    fig.tight_layout()
+    path = _allocate_plot_path(output_dir, job.spec_title, job.x_label, allocated_stems)
+    fig.savefig(path, dpi=figure_config.dpi, bbox_inches="tight")
+    plt.close(fig)
+    return [str(path)], warnings
+
+
+def _plot_selected_sample_trace_job(
+    trace_df: pd.DataFrame,
+    qc_lookup: dict[str, pd.Series],
+    job: ResolvedComposedGraphJob,
+    style: PlotStyleConfig,
+    output_dir: Path,
+    figure_config: FigureConfig,
+    allocated_stems: dict[str, int],
+    group_order: list[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Render one composed trace job for explicitly selected samples."""
+    x_col = _require_column(trace_df, job.x_label)
+    prepared_samples, warnings = _prepare_selected_sample_data(trace_df, qc_lookup, job, x_col)
+    if not prepared_samples:
+        return [], warnings
+
+    if job.display_mode == "individual":
+        saved_paths: list[str] = []
+        for sample_name, sample_frame, sample_qc_row in prepared_samples:
+            sample_lookup = {sample_name: sample_qc_row} if sample_qc_row is not None else {}
+            sample_job = ResolvedComposedGraphJob(
+                spec_title=f"{job.spec_title} - {sample_name}",
+                x_label=job.x_label,
+                left_layers=job.left_layers,
+                right_layer=job.right_layer,
+                overlays=job.overlays,
+                band_mode=job.band_mode,
+                segment_key=job.segment_key,
+                annotations=job.annotations,
+                data_scope=job.data_scope,
+                selected_samples=job.selected_samples,
+                display_mode=job.display_mode,
+                rebase_x=job.rebase_x,
+            )
+            paths, render_warnings = _render_composed_trace_figure(
+                render_trace_df=sample_frame,
+                render_qc_lookup=sample_lookup,
+                job=sample_job,
+                style=style,
+                output_dir=output_dir,
+                figure_config=figure_config,
+                allocated_stems=allocated_stems,
+                group_order=group_order,
+            )
+            saved_paths.extend(paths)
+            warnings.extend(render_warnings)
+        return saved_paths, warnings
+
+    fig, axes = plt.subplots(
+        len(prepared_samples),
+        1,
+        figsize=figure_config.resolve_size(default=(10.0, max(4.0, 3.0 * len(prepared_samples)))),
+        sharex=True,
+    )
+    if len(prepared_samples) == 1:
+        axes = [axes]
+
+    for ax, (sample_name, sample_frame, sample_qc_row) in zip(axes, prepared_samples):
+        sample_lookup = {sample_name: sample_qc_row} if sample_qc_row is not None else {}
+        ax_right, render_warnings = _render_composed_trace_axis(
+            ax,
+            sample_frame,
+            sample_lookup,
+            job,
+            style,
+            group_order=None,
+        )
+        warnings.extend(render_warnings)
+        ax.set_ylabel(" / ".join(axis_label(layer.variable) for layer in job.left_layers))
+        ax.set_title(sample_name)
+        ax.grid(True, linestyle="--", alpha=0.25)
+
+    axes[-1].set_xlabel(axis_label(job.x_label))
+    axes[0].figure.suptitle(f"{job.spec_title} [{job.x_label}]")
     fig.tight_layout()
     path = _allocate_plot_path(output_dir, job.spec_title, job.x_label, allocated_stems)
     fig.savefig(path, dpi=figure_config.dpi, bbox_inches="tight")
