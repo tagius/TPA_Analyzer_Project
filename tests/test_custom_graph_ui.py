@@ -289,7 +289,7 @@ def test_segment_change_triggers_one_autosave_when_builder_repopulates_controls(
     asyncio.run(scenario())
 
 
-def test_generic_select_autosave_guard_consumes_builder_internal_updates(tmp_path: Path) -> None:
+def test_generic_select_autosave_guard_skips_same_value_builder_option_refresh(tmp_path: Path) -> None:
     async def scenario() -> None:
         app = TPAAnalyzerApp(settings=AppSettings(default_data_dir=str(tmp_path), session_autosave_enabled=True))
         autosave_calls = 0
@@ -305,13 +305,20 @@ def test_generic_select_autosave_guard_consumes_builder_internal_updates(tmp_pat
         async with app.run_test() as pilot:
             segment_select = app.query_one("#select_custom_segment", Select)
             autosave_calls = 0
-            app._mark_custom_graph_internal_update(segment_select.id)
+            app._set_custom_select_options(
+                "#select_custom_segment",
+                [("None", "__none__"), ("Segment A", "segment_a")],
+                "__none__",
+                disabled=False,
+            )
 
-            app.handle_persistent_select_changed(SimpleNamespace(select=segment_select))
+            app.handle_persistent_select_changed(
+                SimpleNamespace(select=segment_select, value=str(segment_select.value))
+            )
             await pilot.pause()
 
             assert autosave_calls == 0
-            assert app._consume_custom_graph_internal_update(segment_select.id) is False
+            assert app._should_skip_builder_internal_autosave(segment_select.id, str(segment_select.value)) is False
 
     asyncio.run(scenario())
 

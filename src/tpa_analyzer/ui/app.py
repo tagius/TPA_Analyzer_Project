@@ -446,7 +446,7 @@ class TPAAnalyzerApp(App):
         self.graph_specs: list[GraphSpec | CustomGraphSpec] = []
         self._custom_graph_selected_samples: list[str] = []
         self._syncing_custom_graph_builder = False
-        self._custom_graph_builder_internal_update_counts: dict[str, int] = {}
+        self._custom_graph_builder_internal_update_values: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
         """Compose the full Textual UI."""
@@ -1397,8 +1397,7 @@ class TPAAnalyzerApp(App):
             return
         available_values = {option_value for _, option_value in options}
         next_value = value if value in available_values else options[0][1]
-        if current_value != next_value:
-            self._mark_custom_graph_internal_update(widget_id)
+        self._mark_custom_graph_internal_update(widget_id, next_value)
         select.set_options(options)
         select.value = next_value
         select.disabled = disabled
@@ -1446,32 +1445,27 @@ class TPAAnalyzerApp(App):
         available = set(self._available_custom_graph_samples())
         return [sample for sample in self._custom_graph_selected_samples if sample in available]
 
-    def _mark_custom_graph_internal_update(self, widget_id: str | None) -> None:
-        """Suppress the next builder event emitted by an internal widget refresh."""
+    def _mark_custom_graph_internal_update(self, widget_id: str | None, expected_value: str) -> None:
+        """Suppress the next builder select event emitted by an internal widget refresh."""
         if not widget_id:
             return
         widget_id = widget_id.removeprefix("#")
-        self._custom_graph_builder_internal_update_counts[widget_id] = (
-            self._custom_graph_builder_internal_update_counts.get(widget_id, 0) + 1
-        )
+        self._custom_graph_builder_internal_update_values[widget_id] = expected_value
 
-    def _consume_custom_graph_internal_update(self, widget_id: str | None) -> bool:
-        """Return ``True`` when a builder event came from an internal refresh."""
+    def _consume_custom_graph_internal_update(self, widget_id: str | None, event_value: str) -> bool:
+        """Return ``True`` when a builder event matches a pending internal refresh."""
         if not widget_id:
             return False
         widget_id = widget_id.removeprefix("#")
-        pending = self._custom_graph_builder_internal_update_counts.get(widget_id, 0)
-        if pending <= 0:
+        pending_value = self._custom_graph_builder_internal_update_values.get(widget_id)
+        if pending_value is None:
             return False
-        if pending == 1:
-            self._custom_graph_builder_internal_update_counts.pop(widget_id, None)
-        else:
-            self._custom_graph_builder_internal_update_counts[widget_id] = pending - 1
-        return True
+        self._custom_graph_builder_internal_update_values.pop(widget_id, None)
+        return pending_value == event_value
 
-    def _should_skip_builder_internal_autosave(self, widget_id: str | None) -> bool:
+    def _should_skip_builder_internal_autosave(self, widget_id: str | None, event_value: str) -> bool:
         """Return whether an autosave-triggering event came from a builder-owned refresh."""
-        return self._consume_custom_graph_internal_update(widget_id)
+        return self._consume_custom_graph_internal_update(widget_id, event_value)
 
     def _toggle_custom_graph_sample_by_index(self, option_index: int) -> bool:
         """Toggle one builder sample selection by list index."""
@@ -1918,7 +1912,7 @@ class TPAAnalyzerApp(App):
         """Refresh custom graph builder state after a builder select changes."""
         if self._syncing_custom_graph_builder:
             return
-        if self._should_skip_builder_internal_autosave(event.select.id):
+        if self._should_skip_builder_internal_autosave(event.select.id, str(event.value)):
             return
         self._sync_custom_graph_builder_state()
         self._autosave_session()
@@ -2037,7 +2031,7 @@ class TPAAnalyzerApp(App):
     @on(Select.Changed)
     def handle_persistent_select_changed(self, event: Select.Changed) -> None:
         """Autosave select changes not handled elsewhere."""
-        if self._should_skip_builder_internal_autosave(event.select.id):
+        if self._should_skip_builder_internal_autosave(event.select.id, str(event.value)):
             return
         if event.select.id in {
             "select_custom_view_domain",
