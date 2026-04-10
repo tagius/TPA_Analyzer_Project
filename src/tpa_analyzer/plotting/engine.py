@@ -170,9 +170,6 @@ def _effective_composed_overlays(spec: CustomGraphSpec) -> list[CustomGraphOverl
     if spec.overlay is not None:
         overlays.append(spec.overlay)
 
-    if spec.view_domain == "semantic_segment" and spec.segment_key:
-        overlays.append(CustomGraphOverlay(kind="segment", key=spec.segment_key))
-
     overlays.extend(CustomGraphOverlay(kind=annotation.kind, key=annotation.key) for annotation in spec.annotations)
 
     deduped: list[CustomGraphOverlay] = []

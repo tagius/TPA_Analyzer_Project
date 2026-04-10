@@ -1,7 +1,8 @@
 import pandas as pd
 
+from tpa_analyzer.core.models import CustomGraphAxisLayer, CustomGraphSpec
 from tpa_analyzer.plotting.custom_graphs import eligible_annotation_keys, eligible_overlay_keys, semantic_segment_keys
-from tpa_analyzer.plotting.engine import _slice_trace_to_segment
+from tpa_analyzer.plotting.engine import _slice_trace_to_segment, expand_composed_graph_spec
 
 
 def test_segment_registry_lists_all_supported_semantic_segments() -> None:
@@ -50,3 +51,19 @@ def test_slice_trace_to_segment_rebases_x_to_zero() -> None:
 
     assert list(segment["Time (s)"]) == [0.0, 0.2]
     assert list(segment["Force Corrected (N)"]) == [1.2, 1.5]
+
+
+def test_semantic_segment_expands_without_legacy_overlay_validation() -> None:
+    spec = CustomGraphSpec(
+        title="Segment graph",
+        x_domain="Time (s)",
+        left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+        view_domain="semantic_segment",
+        segment_key="peak2_to_b2_end",
+        rebase_x=True,
+    )
+
+    job = expand_composed_graph_spec(spec)[0]
+
+    assert job.segment_key == "peak2_to_b2_end"
+    assert job.rebase_x is True
