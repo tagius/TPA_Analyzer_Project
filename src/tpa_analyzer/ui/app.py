@@ -45,8 +45,8 @@ from tpa_analyzer.core.exporting import (
     export_tables_bundle,
 )
 from tpa_analyzer.core.models import (
+    CustomGraphAnnotation,
     CustomGraphAxisLayer,
-    CustomGraphOverlay,
     CustomGraphSpec,
     FigureConfig,
     GraphSpec,
@@ -60,14 +60,16 @@ from tpa_analyzer.core.session import (
     session_path,
 )
 from tpa_analyzer.plotting.custom_graphs import (
+    ANNOTATION_COMPATIBILITY,
     OVERLAY_COMPATIBILITY,
     TRACE_COMPATIBILITY,
+    eligible_annotation_keys,
     eligible_left_axis_variables,
-    eligible_overlay_keys,
     eligible_right_axis_variables,
+    eligible_segment_keys,
 )
-from tpa_analyzer.plotting.registry import registry_entry
 from tpa_analyzer.plotting.engine import expand_composed_graph_spec
+from tpa_analyzer.plotting.registry import registry_entry
 from tpa_analyzer.stats.engine import run_statistics
 from tpa_analyzer.ui.layout import resolve_layout_mode
 
@@ -442,6 +444,7 @@ class TPAAnalyzerApp(App):
         self.stats_results: dict[str, dict[str, Any]] = {}
         self.plot_style = PlotStyleConfig()
         self.graph_specs: list[GraphSpec | CustomGraphSpec] = []
+        self._custom_graph_selected_samples: list[str] = []
         self._syncing_custom_graph_builder = False
 
     def compose(self) -> ComposeResult:
@@ -518,6 +521,21 @@ class TPAAnalyzerApp(App):
                         yield Button("Run Analysis", id="btn_analyze", variant="primary")
 
                     with TabPane("Plot Builder"):
+                        yield Label("View Domain", classes="small-label")
+                        yield Select(
+                            [("Full Curve", "full_curve"), ("Semantic Segment", "semantic_segment")],
+                            value="full_curve",
+                            id="select_custom_view_domain",
+                            allow_blank=False,
+                        )
+                        yield Label("Segment", classes="small-label", id="label_custom_segment")
+                        yield Select(
+                            [("None", CUSTOM_GRAPH_NONE)],
+                            value=CUSTOM_GRAPH_NONE,
+                            id="select_custom_segment",
+                            allow_blank=False,
+                        )
+                        yield Label("Curves", classes="small-label")
                         yield Label("X Domain", classes="small-label")
                         yield Select(
                             [(label, label) for label in custom_graph_x_domains()],
@@ -531,8 +549,29 @@ class TPAAnalyzerApp(App):
                                 yield Checkbox(label, value=(label == "Force (N)"), classes="custom-left-axis-choice")
                         yield Label("Right Axis", classes="small-label")
                         yield Select([("None", CUSTOM_GRAPH_NONE)], value=CUSTOM_GRAPH_NONE, id="select_custom_right_axis", allow_blank=False)
-                        yield Label("Overlay", classes="small-label")
-                        yield Select([("None", CUSTOM_GRAPH_NONE)], value=CUSTOM_GRAPH_NONE, id="select_custom_overlay", allow_blank=False)
+                        yield Label("Annotations", classes="small-label", id="label_custom_annotation")
+                        yield Select(
+                            [("None", CUSTOM_GRAPH_NONE)],
+                            value=CUSTOM_GRAPH_NONE,
+                            id="select_custom_annotation",
+                            allow_blank=False,
+                        )
+                        yield Label("Data Scope", classes="small-label")
+                        yield Select(
+                            [("Grouped", "grouped"), ("Selected Samples", "selected_samples")],
+                            value="grouped",
+                            id="select_custom_data_scope",
+                            allow_blank=False,
+                        )
+                        yield Label("Sample Selection", classes="small-label", id="label_custom_sample_list")
+                        yield OptionList(id="custom_graph_sample_list", markup=False)
+                        yield Label("Display Mode", classes="small-label")
+                        yield Select(
+                            [("Stacked", "stacked"), ("Individual", "individual")],
+                            value="stacked",
+                            id="select_custom_display_mode",
+                            allow_blank=False,
+                        )
                         yield Label("Band Type", classes="small-label")
                         yield Select([("SD", "sd"), ("95% CI", "ci95")], value="sd", id="select_band_mode", allow_blank=False)
                         yield Static("", id="custom_graph_summary")
@@ -713,10 +752,15 @@ class TPAAnalyzerApp(App):
                 "stats_mode": str(self.query_one("#select_stats_mode", Select).value),
             },
             "plot_builder": {
+                "view_domain": str(self.query_one("#select_custom_view_domain", Select).value),
+                "segment_key": str(self.query_one("#select_custom_segment", Select).value),
                 "x_domain": str(self.query_one("#select_custom_x_domain", Select).value),
                 "left_axis": self._selected_custom_left_axis_variables(),
                 "right_axis": str(self.query_one("#select_custom_right_axis", Select).value),
-                "overlay": str(self.query_one("#select_custom_overlay", Select).value),
+                "annotation": str(self.query_one("#select_custom_annotation", Select).value),
+                "data_scope": str(self.query_one("#select_custom_data_scope", Select).value),
+                "selected_samples": self._selected_custom_graph_samples(),
+                "display_mode": str(self.query_one("#select_custom_display_mode", Select).value),
                 "band_mode": str(self.query_one("#select_band_mode", Select).value),
                 "graph_title": self.query_one("#input_graph_title", Input).value,
                 "overlay_mode": str(self.query_one("#select_overlay_mode", Select).value),
@@ -818,6 +862,20 @@ class TPAAnalyzerApp(App):
 
             builder = data.get("plot_builder", {})
             if isinstance(builder, dict):
+                overlay_value = str(builder.get("overlay", CUSTOM_GRAPH_NONE))
+                view_domain = str(builder.get("view_domain", "full_curve"))
+                segment_key = str(builder.get("segment_key", CUSTOM_GRAPH_NONE))
+                annotation_value = str(builder.get("annotation", CUSTOM_GRAPH_NONE))
+                if overlay_value != CUSTOM_GRAPH_NONE:
+                    overlay_meta = OVERLAY_COMPATIBILITY.get(overlay_value)
+                    if overlay_meta is not None:
+                        if overlay_meta.item_type == "segment":
+                            view_domain = "semantic_segment"
+                            segment_key = overlay_value
+                        elif overlay_meta.item_type == "annotation":
+                            annotation_value = overlay_value
+
+                self._set_select_if_present("#select_custom_view_domain", view_domain)
                 self._set_select_if_present(
                     "#select_custom_x_domain",
                     str(builder.get("x_domain", builder.get("trace_x", ["Time (s)"])[0])),
@@ -826,7 +884,13 @@ class TPAAnalyzerApp(App):
                 self._set_custom_left_axis_selections(list(builder.get("left_axis", legacy_left_axis)))
                 self._sync_custom_graph_builder_state()
                 self._set_select_if_present("#select_custom_right_axis", str(builder.get("right_axis", CUSTOM_GRAPH_NONE)))
-                self._set_select_if_present("#select_custom_overlay", str(builder.get("overlay", CUSTOM_GRAPH_NONE)))
+                self._set_select_if_present("#select_custom_segment", segment_key)
+                self._set_select_if_present("#select_custom_annotation", annotation_value)
+                self._set_select_if_present("#select_custom_data_scope", str(builder.get("data_scope", "grouped")))
+                self._custom_graph_selected_samples = [
+                    str(item).strip() for item in builder.get("selected_samples", []) if str(item).strip()
+                ]
+                self._set_select_if_present("#select_custom_display_mode", str(builder.get("display_mode", "stacked")))
                 self._set_select_if_present("#select_band_mode", str(builder.get("band_mode", "sd")))
                 self._set_input_if_present("#input_graph_title", str(builder.get("graph_title", "Custom Graph")))
                 self._set_select_if_present("#select_overlay_mode", str(builder.get("overlay_mode", "mean_band")))
@@ -1323,12 +1387,69 @@ class TPAAnalyzerApp(App):
         select.value = value if value in available_values else options[0][1]
         select.disabled = disabled
 
+    def _set_custom_sample_options(self, samples: list[str], selected: list[str]) -> None:
+        """Replace sample-list options without churn when nothing changed."""
+        sample_list = self.query_one("#custom_graph_sample_list", OptionList)
+        current_samples = [str(option.prompt) for option in sample_list._options]
+        current_selected = self._selected_custom_graph_samples()
+        normalized_selected = [sample for sample in selected if sample in samples]
+        if current_samples == samples and current_selected == normalized_selected:
+            return
+        sample_list.clear_options()
+        if samples:
+            sample_list.add_options(samples)
+            if normalized_selected:
+                first_selected = normalized_selected[0]
+                if first_selected in samples:
+                    sample_list.highlighted = samples.index(first_selected)
+            elif sample_list.highlighted is None:
+                sample_list.highlighted = 0
+        self._custom_graph_selected_samples = normalized_selected
+
+    def _available_custom_graph_samples(self) -> list[str]:
+        """Return sample names available to the plot builder in stable order."""
+        available: list[str] = []
+        seen: set[str] = set()
+        if not self.trace_df.empty and "Filename" in self.trace_df.columns:
+            for filename in self.trace_df["Filename"].fillna("").astype(str):
+                normalized = filename.strip()
+                if normalized and normalized not in seen:
+                    seen.add(normalized)
+                    available.append(normalized)
+            return available
+
+        for record in self.file_records:
+            normalized = str(record.get("filename", "")).strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                available.append(normalized)
+        return available
+
+    def _selected_custom_graph_samples(self) -> list[str]:
+        """Return the current plot-builder sample selection."""
+        available = set(self._available_custom_graph_samples())
+        return [sample for sample in self._custom_graph_selected_samples if sample in available]
+
+    def _refresh_custom_graph_sample_list(self) -> None:
+        """Refresh the dedicated Plot Builder sample list."""
+        if not self._widgets_ready():
+            return
+        samples = self._available_custom_graph_samples()
+        self._set_custom_sample_options(samples, self._custom_graph_selected_samples)
+
     def _overlay_label(self, overlay_key: str | None) -> str:
         """Return the user-facing label for an overlay selection."""
         if not overlay_key or overlay_key == CUSTOM_GRAPH_NONE:
             return "None"
         overlay_meta = OVERLAY_COMPATIBILITY.get(overlay_key)
         return overlay_meta.label if overlay_meta is not None else overlay_key
+
+    def _annotation_label(self, annotation_key: str | None) -> str:
+        """Return the user-facing label for an annotation selection."""
+        if not annotation_key or annotation_key == CUSTOM_GRAPH_NONE:
+            return "None"
+        annotation_meta = ANNOTATION_COMPATIBILITY.get(annotation_key)
+        return annotation_meta.label if annotation_meta is not None else annotation_key
 
     def _sync_custom_graph_builder_state(self) -> None:
         """Synchronize composed graph builder controls from the current builder state."""
@@ -1337,6 +1458,7 @@ class TPAAnalyzerApp(App):
 
         self._syncing_custom_graph_builder = True
         try:
+            view_domain = str(self.query_one("#select_custom_view_domain", Select).value)
             x_domain = str(self.query_one("#select_custom_x_domain", Select).value)
             analysis_ready = self._custom_graph_analysis_ready()
             current_selected_left = self._selected_custom_left_axis_variables()
@@ -1386,30 +1508,84 @@ class TPAAnalyzerApp(App):
                 disabled=len(right_axis_options) == 1,
             )
 
-            overlay_select = self.query_one("#select_custom_overlay", Select)
-            current_overlay = str(overlay_select.value)
-            overlay_keys = eligible_overlay_keys(
-                x_domain=x_domain,
-                left_variables=selected_left,
-                analysis_ready=analysis_ready,
-            )
-            overlay_keys = [key for key in overlay_keys if _custom_graph_overlay_available(self.qc_df, key)]
-            overlay_options = [("None", CUSTOM_GRAPH_NONE)]
-            overlay_options.extend((self._overlay_label(key), key) for key in overlay_keys)
+            segment_select = self.query_one("#select_custom_segment", Select)
+            current_segment = str(segment_select.value)
+            segment_keys = [
+                key
+                for key in eligible_segment_keys(x_domain=x_domain, analysis_ready=analysis_ready)
+                if _custom_graph_overlay_available(self.qc_df, key)
+            ]
+            if current_segment not in segment_keys:
+                current_segment = CUSTOM_GRAPH_NONE
+            segment_options = [("None", CUSTOM_GRAPH_NONE)]
+            segment_options.extend((OVERLAY_COMPATIBILITY[key].label, key) for key in segment_keys)
             self._set_custom_select_options(
-                "#select_custom_overlay",
-                overlay_options,
-                current_overlay,
-                disabled=(not analysis_ready) or len(overlay_options) == 1,
+                "#select_custom_segment",
+                segment_options,
+                current_segment,
+                disabled=(view_domain != "semantic_segment") or (not analysis_ready) or len(segment_options) == 1,
             )
 
+            segment_label = self.query_one("#label_custom_segment", Label)
+            active_segment = str(self.query_one("#select_custom_segment", Select).value)
+            show_segment = view_domain == "semantic_segment"
+            segment_label.display = show_segment
+            segment_select.display = show_segment
+
+            annotation_select = self.query_one("#select_custom_annotation", Select)
+            current_annotation = str(annotation_select.value)
+            annotation_keys = (
+                [
+                    key
+                    for key in eligible_annotation_keys(active_segment, selected_left)
+                    if _custom_graph_overlay_available(self.qc_df, key)
+                ]
+                if active_segment != CUSTOM_GRAPH_NONE
+                else []
+            )
+            annotation_options = [("None", CUSTOM_GRAPH_NONE)]
+            annotation_options.extend((self._annotation_label(key), key) for key in annotation_keys)
+            self._set_custom_select_options(
+                "#select_custom_annotation",
+                annotation_options,
+                current_annotation,
+                disabled=(not show_segment) or active_segment == CUSTOM_GRAPH_NONE or len(annotation_options) == 1,
+            )
+
+            data_scope = str(self.query_one("#select_custom_data_scope", Select).value)
+            sample_label = self.query_one("#label_custom_sample_list", Label)
+            sample_list = self.query_one("#custom_graph_sample_list", OptionList)
+            selected_samples_mode = data_scope == "selected_samples"
+            self._refresh_custom_graph_sample_list()
+            available_samples = self._available_custom_graph_samples()
+            sample_label.display = selected_samples_mode
+            sample_list.display = selected_samples_mode
+            sample_list.disabled = (not selected_samples_mode) or not available_samples
+
+            display_mode = self.query_one("#select_custom_display_mode", Select)
+            display_mode.disabled = not selected_samples_mode
+
             right_axis_value = str(self.query_one("#select_custom_right_axis", Select).value)
-            overlay_value = str(self.query_one("#select_custom_overlay", Select).value)
+            annotation_value = str(self.query_one("#select_custom_annotation", Select).value)
+            selected_samples = self._selected_custom_graph_samples()
             summary = (
-                f"X domain: {x_domain}\n"
-                f"Left axis: {', '.join(selected_left) if selected_left else 'None'}\n"
+                f"View domain: {'Semantic segment' if view_domain == 'semantic_segment' else 'Full curve'}\n"
+                f"Segment: {OVERLAY_COMPATIBILITY.get(active_segment).label if active_segment in OVERLAY_COMPATIBILITY else 'None'}\n"
+                f"Curves: {', '.join(selected_left) if selected_left else 'None'}"
+                f"{'' if right_axis_value == CUSTOM_GRAPH_NONE else f' | Right axis: {right_axis_value}'}\n"
+                f"Annotations: {self._annotation_label(annotation_value)}\n"
+                f"Data scope: {'Selected samples' if selected_samples_mode else 'Grouped'}"
+                f"{'' if not selected_samples_mode else f' ({len(selected_samples)} selected)'}\n"
+                f"Display mode: {str(display_mode.value)}"
+            )
+            if view_domain == "semantic_segment" and active_segment == CUSTOM_GRAPH_NONE:
+                summary += "\nWarning: choose a segment before adding the graph."
+            if selected_samples_mode and not selected_samples:
+                summary += "\nWarning: no samples selected."
+            summary += (
+                f"\nX domain: {x_domain}\n"
                 f"Right axis: {right_axis_value if right_axis_value != CUSTOM_GRAPH_NONE else 'None'}\n"
-                f"Overlay: {self._overlay_label(overlay_value)}"
+                f"Band type: {str(self.query_one('#select_band_mode', Select).value).upper()}"
             )
             self.query_one("#custom_graph_summary", Static).update(summary)
         finally:
@@ -1421,12 +1597,11 @@ class TPAAnalyzerApp(App):
             CustomGraphAxisLayer(variable=variable, role="left")
             for variable in self._selected_custom_left_axis_variables()
         ]
+        view_domain = str(self.query_one("#select_custom_view_domain", Select).value)
         right_axis_value = str(self.query_one("#select_custom_right_axis", Select).value)
-        overlay_value = str(self.query_one("#select_custom_overlay", Select).value)
-        overlay = None
-        if overlay_value != CUSTOM_GRAPH_NONE:
-            overlay_meta = OVERLAY_COMPATIBILITY[overlay_value]
-            overlay = CustomGraphOverlay(kind=overlay_meta.item_type, key=overlay_value)
+        segment_value = str(self.query_one("#select_custom_segment", Select).value)
+        annotation_value = str(self.query_one("#select_custom_annotation", Select).value)
+        data_scope = str(self.query_one("#select_custom_data_scope", Select).value)
 
         spec = CustomGraphSpec(
             title=self.query_one("#input_graph_title", Input).value.strip() or "Custom Graph",
@@ -1437,7 +1612,15 @@ class TPAAnalyzerApp(App):
                 if right_axis_value == CUSTOM_GRAPH_NONE
                 else CustomGraphAxisLayer(variable=right_axis_value, role="right")
             ),
-            overlay=overlay,
+            view_domain=view_domain,
+            segment_key=None if view_domain == "full_curve" or segment_value == CUSTOM_GRAPH_NONE else segment_value,
+            rebase_x=view_domain == "semantic_segment",
+            annotations=[]
+            if annotation_value == CUSTOM_GRAPH_NONE
+            else [CustomGraphAnnotation(kind="annotation", key=annotation_value)],
+            data_scope=data_scope,
+            selected_samples=[] if data_scope == "grouped" else self._selected_custom_graph_samples(),
+            display_mode=str(self.query_one("#select_custom_display_mode", Select).value),
             enabled=True,
             band_mode=str(self.query_one("#select_band_mode", Select).value),
         )
@@ -1456,13 +1639,20 @@ class TPAAnalyzerApp(App):
             if isinstance(spec, CustomGraphSpec):
                 left_axis = ", ".join(layer.variable for layer in spec.left_axis) or "None"
                 right_axis = spec.right_axis.variable if spec.right_axis is not None else "None"
-                overlay = self._overlay_label(spec.overlay.key if spec.overlay is not None else None)
+                segment = OVERLAY_COMPATIBILITY.get(spec.segment_key or "")
+                annotation = ", ".join(self._annotation_label(item.key) for item in spec.annotations) or "None"
+                scope = "Selected samples" if spec.data_scope == "selected_samples" else "Grouped"
+                if spec.data_scope == "selected_samples" and spec.selected_samples:
+                    scope = f"{scope} ({', '.join(spec.selected_samples)})"
                 lines.append(
                     f"{index}. {spec.title}\n"
-                    f"   X domain: {spec.x_domain}\n"
-                    f"   Left axis: {left_axis}\n"
+                    f"   View domain: {'Semantic segment' if spec.view_domain == 'semantic_segment' else 'Full curve'}\n"
+                    f"   Segment: {segment.label if segment is not None else 'None'}\n"
+                    f"   Curves: {left_axis}\n"
                     f"   Right axis: {right_axis}\n"
-                    f"   Overlay: {overlay}"
+                    f"   Annotations: {annotation}\n"
+                    f"   Data scope: {scope}\n"
+                    f"   Display mode: {spec.display_mode}"
                 )
                 continue
 
@@ -1660,14 +1850,29 @@ class TPAAnalyzerApp(App):
             self._sync_color_inputs_for_group(group)
             self._autosave_session()
 
+    @on(Select.Changed, "#select_custom_view_domain")
+    @on(Select.Changed, "#select_custom_segment")
+    @on(Select.Changed, "#select_custom_annotation")
     @on(Select.Changed, "#select_custom_x_domain")
     @on(Select.Changed, "#select_custom_right_axis")
-    @on(Select.Changed, "#select_custom_overlay")
+    @on(Select.Changed, "#select_custom_data_scope")
+    @on(Select.Changed, "#select_custom_display_mode")
     def handle_custom_graph_select_changed(self, event: Select.Changed) -> None:
         """Refresh custom graph builder state after a builder select changes."""
         _ = event
         if self._syncing_custom_graph_builder:
             return
+        self._sync_custom_graph_builder_state()
+        self._autosave_session()
+
+    @on(OptionList.OptionSelected, "#custom_graph_sample_list")
+    def handle_custom_graph_sample_selected(self, event: OptionList.OptionSelected) -> None:
+        """Track the currently chosen plot-builder sample."""
+        if self._syncing_custom_graph_builder:
+            return
+        samples = self._available_custom_graph_samples()
+        if 0 <= int(event.option_index) < len(samples):
+            self._custom_graph_selected_samples = [samples[int(event.option_index)]]
         self._sync_custom_graph_builder_state()
         self._autosave_session()
 
@@ -1774,7 +1979,15 @@ class TPAAnalyzerApp(App):
     @on(Select.Changed)
     def handle_persistent_select_changed(self, event: Select.Changed) -> None:
         """Autosave select changes not handled elsewhere."""
-        if event.select.id in {"select_custom_x_domain", "select_custom_right_axis", "select_custom_overlay"}:
+        if event.select.id in {
+            "select_custom_view_domain",
+            "select_custom_segment",
+            "select_custom_annotation",
+            "select_custom_x_domain",
+            "select_custom_right_axis",
+            "select_custom_data_scope",
+            "select_custom_display_mode",
+        }:
             return
         self._autosave_session()
 
