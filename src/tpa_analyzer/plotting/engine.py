@@ -60,6 +60,7 @@ class ResolvedComposedGraphJob:
     selected_samples: list[str]
     display_mode: str
     rebase_x: bool
+    export_stem_suffix: str | None = None
 
 
 def _graph_spec_title(spec: Any) -> str:
@@ -77,7 +78,21 @@ def _is_composed_graph_payload(spec: Any) -> bool:
         return True
     if not isinstance(spec, dict):
         return False
-    return any(key in spec for key in ("x_domain", "left_axis", "right_axis", "overlay"))
+    return any(
+        key in spec
+        for key in (
+            "x_domain",
+            "left_axis",
+            "right_axis",
+            "overlay",
+            "annotations",
+            "view_domain",
+            "segment_key",
+            "data_scope",
+            "selected_samples",
+            "display_mode",
+        )
+    )
 
 
 def _normalize_axis_layer(raw_layer: Any, *, default_role: str) -> CustomGraphAxisLayer:
@@ -302,9 +317,15 @@ def _allocate_plot_path(
     spec_title: str,
     x_label: str,
     allocated_stems: dict[str, int],
+    *,
+    export_stem_suffix: str | None = None,
 ) -> Path:
     """Return a unique output path for one rendered plot."""
-    stem = f"{_slugify(spec_title)}_{_slugify(x_label)}"
+    stem_parts = [_slugify(spec_title)]
+    if export_stem_suffix:
+        stem_parts.append(_slugify(export_stem_suffix))
+    stem_parts.append(_slugify(x_label))
+    stem = "_".join(stem_parts)
     next_index = allocated_stems.get(stem, 0) + 1
     candidate = output_dir / (f"{stem}.png" if next_index == 1 else f"{stem}_{next_index}.png")
     while candidate.exists():
@@ -1464,6 +1485,7 @@ def _plot_selected_sample_trace_job(
                 selected_samples=job.selected_samples,
                 display_mode=job.display_mode,
                 rebase_x=job.rebase_x,
+                export_stem_suffix=sample_name,
             )
             paths, render_warnings = _render_composed_trace_figure(
                 render_trace_df=sample_frame,

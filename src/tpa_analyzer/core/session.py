@@ -24,7 +24,21 @@ def session_path(directory: Path) -> Path:
 
 def _is_composed_graph_payload(spec: Any) -> bool:
     """Return ``True`` for payloads shaped like ``CustomGraphSpec`` data."""
-    return isinstance(spec, dict) and any(key in spec for key in ("x_domain", "left_axis", "right_axis", "overlay"))
+    return isinstance(spec, dict) and any(
+        key in spec
+        for key in (
+            "x_domain",
+            "left_axis",
+            "right_axis",
+            "overlay",
+            "annotations",
+            "view_domain",
+            "segment_key",
+            "data_scope",
+            "selected_samples",
+            "display_mode",
+        )
+    )
 
 
 def _normalize_overlay_payload(raw_overlay: Any) -> CustomGraphOverlay:

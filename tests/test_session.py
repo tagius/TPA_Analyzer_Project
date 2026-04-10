@@ -273,6 +273,37 @@ def test_save_session_data_serializes_composed_graph_specs_cleanly(tmp_path: Pat
     assert graph_spec["overlay"] == {"kind": "segment", "key": "markers"}
 
 
+def test_session_roundtrip_preserves_selected_samples_and_display_mode(tmp_path: Path) -> None:
+    """Custom graph save/load should retain selected-sample session fields."""
+    path = tmp_path / ".tpa_analyzer_session.json"
+    payload = {
+        "graph_specs": [
+            {
+                "title": "Segment Selection",
+                "x_domain": "Time (s)",
+                "left_axis": [{"variable": "Force Corrected (N)", "role": "left"}],
+                "view_domain": "semantic_segment",
+                "segment_key": "b1_start_to_peak1",
+                "rebase_x": True,
+                "data_scope": "selected_samples",
+                "selected_samples": ["a.csv", "b.csv"],
+                "display_mode": "individual",
+            }
+        ]
+    }
+
+    save_session_data(path, payload)
+    loaded = load_session_data(path)
+    migrated = migrate_graph_specs(loaded["graph_specs"])
+
+    assert loaded["graph_specs"][0]["selected_samples"] == ["a.csv", "b.csv"]
+    assert loaded["graph_specs"][0]["display_mode"] == "individual"
+    assert isinstance(migrated[0], CustomGraphSpec)
+    assert migrated[0].data_scope == "selected_samples"
+    assert migrated[0].selected_samples == ["a.csv", "b.csv"]
+    assert migrated[0].display_mode == "individual"
+
+
 def test_save_session_data_preserves_unrecognized_graph_spec_dict(tmp_path: Path) -> None:
     """Unknown graph spec dictionaries should be preserved in session JSON."""
     path = tmp_path / ".tpa_analyzer_session.json"
