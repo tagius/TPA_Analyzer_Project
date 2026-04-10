@@ -674,12 +674,15 @@ def test_plot_custom_graphs_renders_selected_sample_segment_graph_as_one_stacked
         title="Stacked Segment",
         x_domain="Time (s)",
         left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+        right_axis=CustomGraphAxisLayer(variable="Force Corrected (N)", role="right"),
         view_domain="semantic_segment",
         segment_key="b1_start_to_peak1",
         rebase_x=True,
         data_scope="selected_samples",
         selected_samples=["a.csv", "b.csv"],
         display_mode="stacked",
+        annotations=[CustomGraphAnnotation(kind="annotation", key="hardness_peak1")],
+        overlay=CustomGraphOverlay(kind="segment", key="b1_start_to_peak1"),
     )
     original_slice = plotting_engine._slice_trace_to_segment
     slice_calls: list[str] = []
@@ -710,10 +713,16 @@ def test_plot_custom_graphs_renders_selected_sample_segment_graph_as_one_stacked
     assert payload["warnings"] == []
     assert slice_calls == ["a.csv", "b.csv"]
     assert len(saved_figures) == 1
-    assert len(saved_figures[0].axes) == 2
+    assert len(saved_figures[0].axes) == 4
 
     x_limits = [tuple(axis.get_xlim()) for axis in saved_figures[0].axes]
     assert x_limits[0] == pytest.approx(x_limits[1])
+    legend = saved_figures[0].axes[0].get_legend()
+    assert legend is not None
+    legend_labels = [text.get_text() for text in legend.get_texts()]
+    assert "Hardness at Peak1" in legend_labels
+    assert "B1 start -> Peak1" in legend_labels
+    assert any(axis.get_ylabel() == "Force Corrected (N)" for axis in saved_figures[0].axes[1:])
 
 
 def test_plot_custom_graphs_selected_sample_individual_skips_missing_marker_sample_with_warning(
@@ -757,3 +766,35 @@ def test_plot_custom_graphs_selected_sample_individual_skips_missing_marker_samp
     assert "Individual Segment" in payload["warnings"][0]
     assert "b.csv" in payload["warnings"][0]
     assert "Bite1 Start Index" in payload["warnings"][0]
+
+
+def test_plot_custom_graphs_preserves_grouped_segment_skip_warnings_when_all_samples_fail(tmp_path) -> None:
+    """Grouped semantic-segment exports should retain per-file warnings when every sample is skipped."""
+    trace_df, qc_df = _semantic_segment_trace_payload()
+    qc_df["Bite1 Start Index"] = pd.NA
+    spec = CustomGraphSpec(
+        title="Grouped All Missing",
+        x_domain="Time (s)",
+        left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+        view_domain="semantic_segment",
+        segment_key="b1_start_to_peak1",
+        rebase_x=True,
+        data_scope="grouped",
+    )
+
+    payload = plot_custom_graphs(
+        trace_df=trace_df,
+        metrics_df=pd.DataFrame(),
+        qc_df=qc_df,
+        graph_specs=[spec],
+        style=PlotStyleConfig(),
+        output_dir=tmp_path,
+        figure_config=FigureConfig(dpi=72),
+        group_order=["Control", "Treatment"],
+    )
+
+    assert payload["paths"] == []
+    assert len(payload["warnings"]) == 3
+    assert any("a.csv" in warning and "Bite1 Start Index" in warning for warning in payload["warnings"])
+    assert any("b.csv" in warning and "Bite1 Start Index" in warning for warning in payload["warnings"])
+    assert any("unavailable for all files" in warning for warning in payload["warnings"])

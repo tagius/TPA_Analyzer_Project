@@ -604,6 +604,18 @@ def _ordered_legend(
     return list(ordered_handles), list(ordered_labels)
 
 
+def _apply_axis_legend(ax: Any, group_order: list[str] | None = None, extra_axes: list[Any] | None = None) -> None:
+    """Apply a deduplicated legend to one axis, optionally merging labels from sibling axes."""
+    handles, labels = ax.get_legend_handles_labels()
+    for extra_ax in extra_axes or []:
+        extra_handles, extra_labels = extra_ax.get_legend_handles_labels()
+        handles.extend(extra_handles)
+        labels.extend(extra_labels)
+    handles, labels = _ordered_legend(handles, labels, group_order=group_order)
+    if handles:
+        ax.legend(handles, labels, frameon=False)
+
+
 def _categorical_order(values: list[str], preferred_order: list[str] | None = None) -> list[str]:
     """Return a stable categorical order with preferred items first."""
     preferred = [item for item in (preferred_order or []) if item in values]
@@ -1015,7 +1027,8 @@ def _prepare_grouped_trace_data(
         segment_qc_lookup[_resolve_frame_file_name(file_key, frame)] = prepared_qc_row
 
     if not segment_frames:
-        raise PlotSpecError(f"{job.spec_title}: segment '{job.segment_key}' is unavailable for all files.")
+        warnings.append(f"{job.spec_title}: segment '{job.segment_key}' is unavailable for all files.")
+        raise PlotSpecError(" | ".join(warnings))
     return pd.concat(segment_frames, ignore_index=True), segment_qc_lookup, warnings
 
 
@@ -1285,7 +1298,13 @@ def _plot_composed_trace_job(
             group_order=group_order,
         )
 
-    render_trace_df, render_qc_lookup, warnings = _prepare_grouped_trace_data(trace_df, qc_lookup, job, x_col)
+    try:
+        render_trace_df, render_qc_lookup, warnings = _prepare_grouped_trace_data(trace_df, qc_lookup, job, x_col)
+    except PlotSpecError as exc:
+        message = str(exc)
+        if " | " in message:
+            return [], [part for part in message.split(" | ") if part]
+        raise
     return _render_composed_trace_figure(
         render_trace_df=render_trace_df,
         render_qc_lookup=render_qc_lookup,
@@ -1403,15 +1422,7 @@ def _render_composed_trace_figure(
     ax_left.set_ylabel(" / ".join(axis_label(layer.variable) for layer in job.left_layers))
     ax_left.set_title(f"{job.spec_title} [{job.x_label}]")
     ax_left.grid(True, linestyle="--", alpha=0.25)
-
-    handles, labels = ax_left.get_legend_handles_labels()
-    if ax_right is not None:
-        right_handles, right_labels = ax_right.get_legend_handles_labels()
-        handles.extend(right_handles)
-        labels.extend(right_labels)
-    handles, labels = _ordered_legend(handles, labels, group_order=group_order)
-    if handles:
-        ax_left.legend(handles, labels, frameon=False)
+    _apply_axis_legend(ax_left, group_order=group_order, extra_axes=[ax_right] if ax_right is not None else None)
 
     fig.tight_layout()
     path = _allocate_plot_path(output_dir, job.spec_title, job.x_label, allocated_stems)
@@ -1477,6 +1488,7 @@ def _plot_selected_sample_trace_job(
     if len(prepared_samples) == 1:
         axes = [axes]
 
+    legend_axes: list[Any] = []
     for ax, (sample_name, sample_frame, sample_qc_row) in zip(axes, prepared_samples):
         sample_lookup = {sample_name: sample_qc_row} if sample_qc_row is not None else {}
         ax_right, render_warnings = _render_composed_trace_axis(
@@ -1488,12 +1500,17 @@ def _plot_selected_sample_trace_job(
             group_order=None,
         )
         warnings.extend(render_warnings)
+        legend_axes.append(ax)
+        if ax_right is not None:
+            legend_axes.append(ax_right)
         ax.set_ylabel(" / ".join(axis_label(layer.variable) for layer in job.left_layers))
         ax.set_title(sample_name)
         ax.grid(True, linestyle="--", alpha=0.25)
 
     axes[-1].set_xlabel(axis_label(job.x_label))
     axes[0].figure.suptitle(f"{job.spec_title} [{job.x_label}]")
+    if legend_axes:
+        _apply_axis_legend(axes[0], group_order=group_order, extra_axes=legend_axes[1:])
     fig.tight_layout()
     path = _allocate_plot_path(output_dir, job.spec_title, job.x_label, allocated_stems)
     fig.savefig(path, dpi=figure_config.dpi, bbox_inches="tight")
