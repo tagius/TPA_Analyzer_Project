@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from math import ceil
 from pathlib import Path
 import re
@@ -1473,6 +1473,18 @@ def plot_overlay_traces(
     return saved_paths
 
 
-def serialize_graph_specs(graph_specs: list[GraphSpec | CustomGraphSpec]) -> list[dict[str, Any]]:
+def _serialize_graph_spec(spec: Any) -> dict[str, Any]:
+    """Convert a graph-spec payload into plain JSON-compatible data."""
+    if is_dataclass(spec):
+        return asdict(spec)
+    if isinstance(spec, dict):
+        return {
+            key: _serialize_graph_spec(value) if is_dataclass(value) or isinstance(value, dict) else value
+            for key, value in spec.items()
+        }
+    raise TypeError(f"Unsupported graph spec payload: {type(spec)!r}")
+
+
+def serialize_graph_specs(graph_specs: list[GraphSpec | CustomGraphSpec | dict[str, Any]]) -> list[dict[str, Any]]:
     """Serialize graph specs for session persistence."""
-    return [asdict(spec) for spec in graph_specs]
+    return [_serialize_graph_spec(spec) for spec in graph_specs]
