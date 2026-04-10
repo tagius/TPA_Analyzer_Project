@@ -66,7 +66,6 @@ from tpa_analyzer.plotting.custom_graphs import (
     eligible_overlay_keys,
     eligible_right_axis_variables,
 )
-from tpa_analyzer.plotting.registry import registry_entry
 from tpa_analyzer.plotting.engine import expand_composed_graph_spec
 from tpa_analyzer.stats.engine import run_statistics
 from tpa_analyzer.ui.layout import resolve_layout_mode
@@ -141,35 +140,6 @@ def custom_graph_x_domains() -> list[str]:
             if x_domain not in ordered:
                 ordered.append(x_domain)
     return ordered
-
-
-def _left_axis_variables_compatible(variables: list[str]) -> bool:
-    """Return whether selected left-axis variables share one unit."""
-    units = {registry_entry(str(variable).strip()).unit for variable in variables if str(variable).strip() and registry_entry(str(variable).strip()).unit}
-    return len(units) <= 1
-
-
-def _eligible_left_axis_variables_for_selection(
-    x_domain: str,
-    selected_left_variables: list[str],
-    analysis_ready: bool,
-) -> list[str]:
-    """Return left-axis variables compatible with the current selection."""
-    eligible = eligible_left_axis_variables(x_domain=x_domain, analysis_ready=analysis_ready)
-    selected = [str(variable).strip() for variable in selected_left_variables if str(variable).strip()]
-    if not selected:
-        return eligible
-
-    selected_units = {registry_entry(variable).unit for variable in selected if registry_entry(variable).unit}
-    if len(selected_units) != 1:
-        return eligible
-
-    selected_unit = next(iter(selected_units))
-    return [
-        variable
-        for variable in eligible
-        if variable in selected or registry_entry(variable).unit == selected_unit
-    ]
 
 
 def derive_group_order_from_file_records(file_records: Any) -> list[str]:
@@ -1270,26 +1240,6 @@ class TPAAnalyzerApp(App):
         """Return whether analysis-derived custom graph controls may be enabled."""
         return not self.trace_df.empty
 
-    def _custom_graph_overlay_available(self, overlay_key: str) -> bool:
-        """Return whether the current QC summary contains prerequisites for one overlay."""
-        required_columns = custom_graph_overlay_qc_columns(overlay_key)
-        if not required_columns:
-            return False
-        qc_df = _filter_assigned_group_rows(self.qc_df)
-        if qc_df.empty:
-            return False
-
-        row_mask = pd.Series(True, index=qc_df.index, dtype=bool)
-        for column in required_columns:
-            if column not in qc_df.columns:
-                return False
-            values = qc_df[column]
-            value_mask = values.notna()
-            if values.dtype == object:
-                value_mask &= values.astype(str).str.strip().ne("")
-            row_mask &= value_mask
-        return bool(row_mask.any())
-
     def _custom_left_axis_checkboxes(self) -> list[Checkbox]:
         """Return all left-axis checkboxes in builder order."""
         if not self._widgets_ready():
@@ -1334,11 +1284,9 @@ class TPAAnalyzerApp(App):
         try:
             x_domain = str(self.query_one("#select_custom_x_domain", Select).value)
             analysis_ready = self._custom_graph_analysis_ready()
-            current_selected_left = self._selected_custom_left_axis_variables()
             eligible_left = set(
-                _eligible_left_axis_variables_for_selection(
+                eligible_left_axis_variables(
                     x_domain=x_domain,
-                    selected_left_variables=current_selected_left,
                     analysis_ready=analysis_ready,
                 )
             )
@@ -1388,7 +1336,6 @@ class TPAAnalyzerApp(App):
                 left_variables=selected_left,
                 analysis_ready=analysis_ready,
             )
-            overlay_keys = [key for key in overlay_keys if self._custom_graph_overlay_available(key)]
             overlay_options = [("None", CUSTOM_GRAPH_NONE)]
             overlay_options.extend((self._overlay_label(key), key) for key in overlay_keys)
             self._set_custom_select_options(
@@ -1671,16 +1618,10 @@ class TPAAnalyzerApp(App):
         """Keep the custom left-axis list constrained to two active selections."""
         if self._syncing_custom_graph_builder:
             return
-        if event.checkbox.value:
-            selected_left = self._selected_custom_left_axis_variables()
-            if len(selected_left) > 2:
-                event.checkbox.value = False
-                self._set_status("Select at most two left-axis variables.")
-                return
-            if not _left_axis_variables_compatible(selected_left):
-                event.checkbox.value = False
-                self._set_status("Left-axis variables must share the same unit.")
-                return
+        if event.checkbox.value and len(self._selected_custom_left_axis_variables()) > 2:
+            event.checkbox.value = False
+            self._set_status("Select at most two left-axis variables.")
+            return
         self._sync_custom_graph_builder_state()
         self._autosave_session()
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final, Literal
 
+from tpa_analyzer.plotting.registry import registry_entry
+
 PlotItemType = Literal["trace", "segment", "annotation", "window", "inset_bar"]
 
 
@@ -229,6 +231,39 @@ def eligible_right_axis_variables(x_domain: str, left_variables: list[str], anal
     left_axis_candidates = eligible_left_axis_variables(x_domain=x_domain, analysis_ready=analysis_ready)
     selected_left_variables = {str(variable).strip() for variable in left_variables if str(variable).strip()}
     return [variable for variable in left_axis_candidates if variable not in selected_left_variables]
+
+
+def left_axis_variables_compatible(variables: list[str]) -> bool:
+    """Return ``True`` when all selected left-axis variables share one unit."""
+    units = {
+        registry_entry(str(variable).strip()).unit
+        for variable in variables
+        if str(variable).strip() and registry_entry(str(variable).strip()).unit
+    }
+    return len(units) <= 1
+
+
+def eligible_left_axis_variables_for_selection(
+    x_domain: str,
+    selected_left_variables: list[str],
+    analysis_ready: bool,
+) -> list[str]:
+    """Return left-axis variables compatible with the current left-axis selection."""
+    eligible = eligible_left_axis_variables(x_domain=x_domain, analysis_ready=analysis_ready)
+    selected = [str(variable).strip() for variable in selected_left_variables if str(variable).strip()]
+    if not selected:
+        return eligible
+
+    selected_units = {registry_entry(variable).unit for variable in selected if registry_entry(variable).unit}
+    if len(selected_units) != 1:
+        return eligible
+
+    selected_unit = next(iter(selected_units))
+    return [
+        variable
+        for variable in eligible
+        if variable in selected or registry_entry(variable).unit == selected_unit
+    ]
 
 
 def eligible_overlay_keys(x_domain: str, left_variables: list[str], analysis_ready: bool) -> list[str]:
