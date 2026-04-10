@@ -574,6 +574,7 @@ class TPAAnalyzerApp(App):
                         )
                         yield Label("Band Type", classes="small-label")
                         yield Select([("SD", "sd"), ("95% CI", "ci95")], value="sd", id="select_band_mode", allow_blank=False)
+                        yield Label("Live Summary", classes="small-label")
                         yield Static("", id="custom_graph_summary")
                         yield Label("Graph Title", classes="small-label")
                         yield Input(value="Custom Graph", id="input_graph_title")
@@ -1973,7 +1974,8 @@ class TPAAnalyzerApp(App):
     @on(Checkbox.Changed)
     def handle_checkbox_changed(self, event: Checkbox.Changed) -> None:
         """Autosave any checkbox change."""
-        _ = event
+        if event.checkbox.id is None and event.checkbox.has_class("custom-left-axis-choice"):
+            return
         self._autosave_session()
 
     @on(Select.Changed)

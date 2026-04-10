@@ -210,6 +210,60 @@ def test_segment_selection_triggers_one_autosave_when_builder_is_synchronized(tm
     asyncio.run(scenario())
 
 
+def test_left_axis_checkbox_triggers_one_autosave_when_builder_is_synchronized(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        app = TPAAnalyzerApp(
+            settings=AppSettings(default_data_dir=str(tmp_path), session_autosave_enabled=True)
+        )
+        autosave_calls = 0
+        original_autosave = app._autosave_session
+
+        def counting_autosave() -> None:
+            nonlocal autosave_calls
+            autosave_calls += 1
+            original_autosave()
+
+        app._autosave_session = counting_autosave  # type: ignore[method-assign]
+
+        async with app.run_test() as pilot:
+            app._apply_analysis_results(
+                pd.DataFrame([{"Filename": "sample.csv", "Group": "Control"}]),
+                pd.DataFrame(
+                    [
+                        {
+                            "File": "sample.csv",
+                            "Filename": "sample.csv",
+                            "Group": "Control",
+                            "Time (s)": 0.0,
+                            "Aligned Time (s)": 0.0,
+                            "Force (N)": 1.0,
+                            "Force Corrected (N)": 1.0,
+                            "Deformation (mm)": 0.1,
+                        }
+                    ]
+                ),
+                pd.DataFrame(),
+                {},
+                [],
+                [],
+            )
+            await pilot.pause()
+
+            force = _checkbox_by_label(app, "Force (N)")
+            force_corrected = _checkbox_by_label(app, "Force Corrected (N)")
+
+            force.value = False
+            await pilot.pause()
+
+            autosave_calls = 0
+            force_corrected.value = True
+            await pilot.pause()
+
+            assert autosave_calls == 1
+
+    asyncio.run(scenario())
+
+
 def test_segment_options_reset_when_grouping_change_invalidates_analysis_results(tmp_path: Path) -> None:
     async def scenario() -> None:
         app = _make_app(tmp_path)
