@@ -39,7 +39,11 @@ from tpa_analyzer.core.constants import (
     SUPPORTED_DATA_EXTENSIONS,
 )
 from tpa_analyzer.core.errors import AnalysisError, DataParseError, PlotSpecError, SessionError
-from tpa_analyzer.core.exporting import current_export_root, export_plot_bundle, export_tables_bundle
+from tpa_analyzer.core.exporting import (
+    current_export_root,
+    export_plot_bundle,
+    export_tables_bundle,
+)
 from tpa_analyzer.core.models import (
     CustomGraphAxisLayer,
     CustomGraphOverlay,
@@ -49,7 +53,12 @@ from tpa_analyzer.core.models import (
     PlotStyleConfig,
     is_hex_color,
 )
-from tpa_analyzer.core.session import load_session_data, migrate_graph_specs, save_session_data, session_path
+from tpa_analyzer.core.session import (
+    load_session_data,
+    migrate_graph_specs,
+    save_session_data,
+    session_path,
+)
 from tpa_analyzer.plotting.custom_graphs import (
     OVERLAY_COMPATIBILITY,
     TRACE_COMPATIBILITY,
@@ -57,10 +66,10 @@ from tpa_analyzer.plotting.custom_graphs import (
     eligible_overlay_keys,
     eligible_right_axis_variables,
 )
+from tpa_analyzer.plotting.registry import registry_entry
 from tpa_analyzer.plotting.engine import expand_composed_graph_spec
 from tpa_analyzer.stats.engine import run_statistics
 from tpa_analyzer.ui.layout import resolve_layout_mode
-
 
 PARAM_INFO: dict[str, dict[str, str]] = {
     "sample_height": {
@@ -105,6 +114,25 @@ PARAM_INFO: dict[str, dict[str, str]] = {
 CUSTOM_GRAPH_NONE = "__none__"
 
 
+def custom_graph_overlay_qc_columns(overlay_key: str) -> tuple[str, ...]:
+    """Return the QC summary columns required for one overlay option."""
+    if overlay_key == "b1_start_to_peak1":
+        return ("Bite1 Start Index", "Peak1 Index")
+    if overlay_key == "peak1_to_b1_end":
+        return ("Peak1 Index", "Bite1 End Index")
+    if overlay_key == "b1_end_to_b2_start":
+        return ("Bite1 End Index", "Bite2 Start Index")
+    if overlay_key == "b2_start_to_peak2":
+        return ("Bite2 Start Index", "Peak2 Index")
+    if overlay_key == "hardness_peak1":
+        return ("Peak1 Index",)
+    if overlay_key == "adhesiveness":
+        return ("Bite1 End Index", "Bite2 Start Index")
+    if overlay_key == "modulus_window":
+        return ("Modulus Strain Min (%)", "Modulus Strain Max (%)")
+    return ()
+
+
 def custom_graph_x_domains() -> list[str]:
     """Return X-domain options supported by the composed graph builder."""
     ordered: list[str] = []
@@ -113,6 +141,35 @@ def custom_graph_x_domains() -> list[str]:
             if x_domain not in ordered:
                 ordered.append(x_domain)
     return ordered
+
+
+def _left_axis_variables_compatible(variables: list[str]) -> bool:
+    """Return whether selected left-axis variables share one unit."""
+    units = {registry_entry(str(variable).strip()).unit for variable in variables if str(variable).strip() and registry_entry(str(variable).strip()).unit}
+    return len(units) <= 1
+
+
+def _eligible_left_axis_variables_for_selection(
+    x_domain: str,
+    selected_left_variables: list[str],
+    analysis_ready: bool,
+) -> list[str]:
+    """Return left-axis variables compatible with the current selection."""
+    eligible = eligible_left_axis_variables(x_domain=x_domain, analysis_ready=analysis_ready)
+    selected = [str(variable).strip() for variable in selected_left_variables if str(variable).strip()]
+    if not selected:
+        return eligible
+
+    selected_units = {registry_entry(variable).unit for variable in selected if registry_entry(variable).unit}
+    if len(selected_units) != 1:
+        return eligible
+
+    selected_unit = next(iter(selected_units))
+    return [
+        variable
+        for variable in eligible
+        if variable in selected or registry_entry(variable).unit == selected_unit
+    ]
 
 
 def derive_group_order_from_file_records(file_records: Any) -> list[str]:
@@ -1213,6 +1270,26 @@ class TPAAnalyzerApp(App):
         """Return whether analysis-derived custom graph controls may be enabled."""
         return not self.trace_df.empty
 
+    def _custom_graph_overlay_available(self, overlay_key: str) -> bool:
+        """Return whether the current QC summary contains prerequisites for one overlay."""
+        required_columns = custom_graph_overlay_qc_columns(overlay_key)
+        if not required_columns:
+            return False
+        qc_df = _filter_assigned_group_rows(self.qc_df)
+        if qc_df.empty:
+            return False
+
+        row_mask = pd.Series(True, index=qc_df.index, dtype=bool)
+        for column in required_columns:
+            if column not in qc_df.columns:
+                return False
+            values = qc_df[column]
+            value_mask = values.notna()
+            if values.dtype == object:
+                value_mask &= values.astype(str).str.strip().ne("")
+            row_mask &= value_mask
+        return bool(row_mask.any())
+
     def _custom_left_axis_checkboxes(self) -> list[Checkbox]:
         """Return all left-axis checkboxes in builder order."""
         if not self._widgets_ready():
@@ -1232,6 +1309,10 @@ class TPAAnalyzerApp(App):
     def _set_custom_select_options(self, widget_id: str, options: list[tuple[str, str]], value: str, disabled: bool) -> None:
         """Replace select options while keeping a valid current value."""
         select = self.query_one(widget_id, Select)
+        current_options = list(getattr(select, "_options", []))
+        current_value = str(select.value)
+        if current_options == options and current_value == value and select.disabled == disabled:
+            return
         select.set_options(options)
         available_values = {option_value for _, option_value in options}
         select.value = value if value in available_values else options[0][1]
@@ -1253,7 +1334,14 @@ class TPAAnalyzerApp(App):
         try:
             x_domain = str(self.query_one("#select_custom_x_domain", Select).value)
             analysis_ready = self._custom_graph_analysis_ready()
-            eligible_left = set(eligible_left_axis_variables(x_domain=x_domain, analysis_ready=analysis_ready))
+            current_selected_left = self._selected_custom_left_axis_variables()
+            eligible_left = set(
+                _eligible_left_axis_variables_for_selection(
+                    x_domain=x_domain,
+                    selected_left_variables=current_selected_left,
+                    analysis_ready=analysis_ready,
+                )
+            )
 
             selected_left: list[str] = []
             for checkbox in self._custom_left_axis_checkboxes():
@@ -1300,6 +1388,7 @@ class TPAAnalyzerApp(App):
                 left_variables=selected_left,
                 analysis_ready=analysis_ready,
             )
+            overlay_keys = [key for key in overlay_keys if self._custom_graph_overlay_available(key)]
             overlay_options = [("None", CUSTOM_GRAPH_NONE)]
             overlay_options.extend((self._overlay_label(key), key) for key in overlay_keys)
             self._set_custom_select_options(
@@ -1582,10 +1671,16 @@ class TPAAnalyzerApp(App):
         """Keep the custom left-axis list constrained to two active selections."""
         if self._syncing_custom_graph_builder:
             return
-        if event.checkbox.value and len(self._selected_custom_left_axis_variables()) > 2:
-            event.checkbox.value = False
-            self._set_status("Select at most two left-axis variables.")
-            return
+        if event.checkbox.value:
+            selected_left = self._selected_custom_left_axis_variables()
+            if len(selected_left) > 2:
+                event.checkbox.value = False
+                self._set_status("Select at most two left-axis variables.")
+                return
+            if not _left_axis_variables_compatible(selected_left):
+                event.checkbox.value = False
+                self._set_status("Left-axis variables must share the same unit.")
+                return
         self._sync_custom_graph_builder_state()
         self._autosave_session()
 
@@ -1674,7 +1769,8 @@ class TPAAnalyzerApp(App):
     @on(Select.Changed)
     def handle_persistent_select_changed(self, event: Select.Changed) -> None:
         """Autosave select changes not handled elsewhere."""
-        _ = event
+        if event.select.id in {"select_custom_x_domain", "select_custom_right_axis", "select_custom_overlay"}:
+            return
         self._autosave_session()
 
     @on(Button.Pressed, "#btn_analyze")
@@ -1905,7 +2001,7 @@ class TPAAnalyzerApp(App):
             group_order=self.group_order.copy(),
         )
         self.export_all_worker(
-            metrics_df=self.metrics_df.copy(),
+            metrics_df=metrics_df,
             trace_df=trace_df,
             qc_df=qc_df,
             stats_results=stats_results,

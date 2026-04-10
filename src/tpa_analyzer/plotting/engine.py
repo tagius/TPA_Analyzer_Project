@@ -26,10 +26,7 @@ from tpa_analyzer.core.models import (
     GraphSpec,
     PlotStyleConfig,
 )
-from tpa_analyzer.plotting.custom_graphs import (
-    OVERLAY_COMPATIBILITY,
-    left_axis_variables_compatible,
-)
+from tpa_analyzer.plotting.custom_graphs import OVERLAY_COMPATIBILITY
 from tpa_analyzer.plotting.registry import VARIABLE_REGISTRY, axis_label, registry_entry
 
 
@@ -200,7 +197,12 @@ def validate_composed_graph_spec(spec: CustomGraphSpec) -> None:
 
     if not spec.left_axis:
         raise PlotSpecError("Select at least one left-axis variable.")
-    if not left_axis_variables_compatible([layer.variable for layer in spec.left_axis]):
+    left_units = {
+        registry_entry(layer.variable).unit
+        for layer in spec.left_axis
+        if registry_entry(layer.variable).unit
+    }
+    if len(left_units) > 1:
         raise PlotSpecError("Left-axis variables must share the same unit.")
 
     for layer in [*spec.left_axis, *([spec.right_axis] if spec.right_axis is not None else [])]:

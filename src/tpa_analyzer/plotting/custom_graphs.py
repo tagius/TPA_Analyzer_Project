@@ -16,7 +16,6 @@ class CompatiblePlotItem:
     label: str
     item_type: PlotItemType
     allowed_x_domains: tuple[str, ...]
-    unit_family: str = ""
     requires_analysis: bool = False
     requires_left_variables: tuple[str, ...] = ()
     blocks_with: tuple[str, ...] = ()
@@ -48,14 +47,12 @@ TRACE_COMPATIBILITY: Final[dict[str, CompatiblePlotItem]] = {
         label="Force (N)",
         item_type="trace",
         allowed_x_domains=("Time (s)", "Aligned Time (s)"),
-        unit_family="N",
     ),
     "Force Corrected (N)": CompatiblePlotItem(
         key="Force Corrected (N)",
         label="Force Corrected (N)",
         item_type="trace",
         allowed_x_domains=("Time (s)", "Aligned Time (s)"),
-        unit_family="N",
         requires_analysis=True,
     ),
     "Deformation (mm)": CompatiblePlotItem(
@@ -63,7 +60,6 @@ TRACE_COMPATIBILITY: Final[dict[str, CompatiblePlotItem]] = {
         label="Deformation (mm)",
         item_type="trace",
         allowed_x_domains=("Time (s)", "Aligned Time (s)"),
-        unit_family="mm",
         requires_analysis=True,
     ),
     "True Stress (kPa)": CompatiblePlotItem(
@@ -71,7 +67,6 @@ TRACE_COMPATIBILITY: Final[dict[str, CompatiblePlotItem]] = {
         label="True Stress (kPa)",
         item_type="trace",
         allowed_x_domains=("True Strain (%)",),
-        unit_family="kPa",
         requires_analysis=True,
     ),
 }
@@ -141,7 +136,6 @@ ANNOTATION_COMPATIBILITY: Final[dict[str, SegmentAnnotation]] = {
 
 def _legacy_overlay_item(segment: SemanticSegment) -> CompatiblePlotItem:
     """Translate segment metadata to the legacy composed-graph compatibility shape."""
-    requires_left_variables = ("True Stress (kPa)",) if segment.key == "modulus_window" else ("Force Corrected (N)",)
     item_type = "window" if segment.key == "modulus_window" else "segment"
     return CompatiblePlotItem(
         key=segment.key,
@@ -149,7 +143,7 @@ def _legacy_overlay_item(segment: SemanticSegment) -> CompatiblePlotItem:
         item_type=item_type,
         allowed_x_domains=segment.allowed_x_domains,
         requires_analysis=True,
-        requires_left_variables=requires_left_variables,
+        requires_left_variables=("True Stress (kPa)",) if segment.key == "modulus_window" else ("Force Corrected (N)",),
     )
 
 
@@ -174,8 +168,13 @@ def _legacy_annotation_x_domains(annotation: SegmentAnnotation) -> tuple[str, ..
 
 
 OVERLAY_COMPATIBILITY: Final[dict[str, CompatiblePlotItem]] = {
-    **{key: _legacy_overlay_item(segment) for key, segment in SEMANTIC_SEGMENTS.items()},
-    **{key: _legacy_annotation_item(annotation) for key, annotation in ANNOTATION_COMPATIBILITY.items()},
+    "b1_start_to_peak1": _legacy_overlay_item(SEMANTIC_SEGMENTS["b1_start_to_peak1"]),
+    "peak1_to_b1_end": _legacy_overlay_item(SEMANTIC_SEGMENTS["peak1_to_b1_end"]),
+    "b1_end_to_b2_start": _legacy_overlay_item(SEMANTIC_SEGMENTS["b1_end_to_b2_start"]),
+    "b2_start_to_peak2": _legacy_overlay_item(SEMANTIC_SEGMENTS["b2_start_to_peak2"]),
+    "hardness_peak1": _legacy_annotation_item(ANNOTATION_COMPATIBILITY["hardness_peak1"]),
+    "adhesiveness": _legacy_annotation_item(ANNOTATION_COMPATIBILITY["adhesiveness"]),
+    "modulus_window": _legacy_annotation_item(ANNOTATION_COMPATIBILITY["modulus_window"]),
 }
 
 
@@ -225,43 +224,6 @@ def eligible_left_axis_variables(x_domain: str, analysis_ready: bool) -> list[st
     return eligible
 
 
-def left_axis_variables_compatible(variables: list[str]) -> bool:
-    """Return ``True`` when all selected left-axis variables share one unit family."""
-    families = {
-        item.unit_family
-        for variable in variables
-        if (item := TRACE_COMPATIBILITY.get(str(variable).strip())) is not None and item.unit_family
-    }
-    return len(families) <= 1
-
-
-def eligible_left_axis_variables_for_selection(
-    x_domain: str,
-    selected_left_variables: list[str],
-    analysis_ready: bool,
-) -> list[str]:
-    """Return left-axis variables compatible with the current left-axis selection."""
-    eligible = eligible_left_axis_variables(x_domain=x_domain, analysis_ready=analysis_ready)
-    selected = [str(variable).strip() for variable in selected_left_variables if str(variable).strip()]
-    if not selected:
-        return eligible
-
-    selected_families = {
-        item.unit_family
-        for variable in selected
-        if (item := TRACE_COMPATIBILITY.get(variable)) is not None and item.unit_family
-    }
-    if len(selected_families) != 1:
-        return eligible
-
-    selected_family = next(iter(selected_families))
-    return [
-        variable
-        for variable in eligible
-        if variable in selected or TRACE_COMPATIBILITY[variable].unit_family == selected_family
-    ]
-
-
 def eligible_right_axis_variables(x_domain: str, left_variables: list[str], analysis_ready: bool) -> list[str]:
     """Return right-axis trace variables compatible with the current left-axis selection."""
     left_axis_candidates = eligible_left_axis_variables(x_domain=x_domain, analysis_ready=analysis_ready)
@@ -271,9 +233,29 @@ def eligible_right_axis_variables(x_domain: str, left_variables: list[str], anal
 
 def eligible_overlay_keys(x_domain: str, left_variables: list[str], analysis_ready: bool) -> list[str]:
     """Return overlay keys that match the current graph composition."""
-    overlay_keys: list[str] = []
-    selected_left_variables = [str(variable).strip() for variable in left_variables if str(variable).strip()]
-    for segment_key in eligible_segment_keys(x_domain=x_domain, analysis_ready=analysis_ready):
-        overlay_keys.append(segment_key)
-        overlay_keys.extend(eligible_annotation_keys(segment_key, selected_left_variables))
-    return list(dict.fromkeys(overlay_keys))
+    return _eligible_items(
+        OVERLAY_COMPATIBILITY,
+        x_domain=x_domain,
+        left_variables=left_variables,
+        analysis_ready=analysis_ready,
+    )
+
+
+def _eligible_items(
+    items: dict[str, CompatiblePlotItem],
+    x_domain: str,
+    left_variables: list[str],
+    analysis_ready: bool,
+) -> list[str]:
+    """Return keys whose compatibility metadata matches the current graph state."""
+    selected_left_variables = {str(variable).strip() for variable in left_variables if str(variable).strip()}
+    eligible: list[str] = []
+    for key, item in items.items():
+        if x_domain not in item.allowed_x_domains:
+            continue
+        if item.requires_analysis and not analysis_ready:
+            continue
+        if item.requires_left_variables and not set(item.requires_left_variables).issubset(selected_left_variables):
+            continue
+        eligible.append(key)
+    return eligible
