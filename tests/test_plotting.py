@@ -766,7 +766,8 @@ def test_plot_custom_graphs_selected_sample_individual_skips_missing_marker_samp
     assert "Individual Segment" in payload["warnings"][0]
     assert "b.csv" in payload["warnings"][0]
     assert "Bite1 Start Index" in payload["warnings"][0]
-    assert "a_csv" in Path(payload["paths"][0]).stem
+    assert Path(payload["paths"][0]).stem == "individual_segment_a_csv_time_s"
+    assert saved_figures[0].axes[0].get_title() == "Individual Segment [Time (s)]"
 
 
 def test_plot_custom_graphs_preserves_grouped_segment_skip_warnings_when_all_samples_fail(tmp_path) -> None:

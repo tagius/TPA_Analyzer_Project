@@ -1446,7 +1446,13 @@ def _render_composed_trace_figure(
     _apply_axis_legend(ax_left, group_order=group_order, extra_axes=[ax_right] if ax_right is not None else None)
 
     fig.tight_layout()
-    path = _allocate_plot_path(output_dir, job.spec_title, job.x_label, allocated_stems)
+    path = _allocate_plot_path(
+        output_dir,
+        job.spec_title,
+        job.x_label,
+        allocated_stems,
+        export_stem_suffix=job.export_stem_suffix,
+    )
     fig.savefig(path, dpi=figure_config.dpi, bbox_inches="tight")
     plt.close(fig)
     return [str(path)], warnings
@@ -1473,7 +1479,7 @@ def _plot_selected_sample_trace_job(
         for sample_name, sample_frame, sample_qc_row in prepared_samples:
             sample_lookup = {sample_name: sample_qc_row} if sample_qc_row is not None else {}
             sample_job = ResolvedComposedGraphJob(
-                spec_title=f"{job.spec_title} - {sample_name}",
+                spec_title=job.spec_title,
                 x_label=job.x_label,
                 left_layers=job.left_layers,
                 right_layer=job.right_layer,
