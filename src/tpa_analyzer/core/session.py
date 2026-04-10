@@ -51,6 +51,19 @@ def _normalize_annotation_payload(raw_annotation: Any) -> CustomGraphAnnotation:
     )
 
 
+def _dedupe_annotations(raw_annotations: list[Any]) -> list[CustomGraphAnnotation]:
+    """Normalize annotations and keep the first occurrence of each key."""
+    deduped: list[CustomGraphAnnotation] = []
+    seen_keys: set[str] = set()
+    for item in raw_annotations:
+        annotation = _normalize_annotation_payload(item)
+        if annotation.key in seen_keys:
+            continue
+        seen_keys.add(annotation.key)
+        deduped.append(annotation)
+    return deduped
+
+
 def _migrate_legacy_composed_graph_payload(spec: dict[str, Any]) -> dict[str, Any]:
     """Promote legacy composed-graph overlay recipes into the new recipe fields."""
     migrated = dict(spec)
@@ -68,12 +81,9 @@ def _migrate_legacy_composed_graph_payload(spec: dict[str, Any]) -> dict[str, An
         return migrated
 
     if overlay.kind == "annotation":
-        annotations = list(migrated.get("annotations", []))
-        if overlay.key not in {
-            _normalize_annotation_payload(annotation).key
-            for annotation in annotations
-        }:
-            annotations.append({"kind": "annotation", "key": overlay.key})
+        annotations = _dedupe_annotations(list(migrated.get("annotations", [])))
+        if overlay.key not in {annotation.key for annotation in annotations}:
+            annotations.append(CustomGraphAnnotation(kind="annotation", key=overlay.key))
         migrated["annotations"] = annotations
         if migrated.get("segment_key"):
             migrated["view_domain"] = "semantic_segment"

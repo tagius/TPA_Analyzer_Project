@@ -55,7 +55,7 @@ class ResolvedComposedGraphJob:
     x_label: str
     left_layers: list[CustomGraphAxisLayer]
     right_layer: CustomGraphAxisLayer | None
-    overlay: CustomGraphOverlay | None
+    overlays: list[CustomGraphOverlay]
     band_mode: str
 
 
@@ -160,6 +160,29 @@ def normalize_composed_graph_spec(spec: CustomGraphSpec | dict[str, Any]) -> Cus
         raise PlotSpecError(str(exc)) from exc
 
 
+def _effective_composed_overlays(spec: CustomGraphSpec) -> list[CustomGraphOverlay]:
+    """Return overlays implied by the persisted custom-graph recipe."""
+    overlays: list[CustomGraphOverlay] = []
+
+    if spec.overlay is not None:
+        overlays.append(spec.overlay)
+
+    if spec.view_domain == "semantic_segment" and spec.segment_key:
+        overlays.append(CustomGraphOverlay(kind="segment", key=spec.segment_key))
+
+    overlays.extend(CustomGraphOverlay(kind=annotation.kind, key=annotation.key) for annotation in spec.annotations)
+
+    deduped: list[CustomGraphOverlay] = []
+    seen: set[tuple[str, str]] = set()
+    for overlay in overlays:
+        identity = (overlay.kind, overlay.key)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        deduped.append(overlay)
+    return deduped
+
+
 def validate_composed_graph_spec(spec: CustomGraphSpec) -> None:
     """Validate that a composed graph spec is self-consistent and trace-safe."""
     if not spec.title.strip():
@@ -189,23 +212,25 @@ def validate_composed_graph_spec(spec: CustomGraphSpec) -> None:
         if y_meta.kind != "y":
             raise PlotSpecError(f"Y variable '{layer.variable}' is not selectable on the y-axis.")
 
-    if spec.overlay is None:
+    effective_overlays = _effective_composed_overlays(spec)
+    if not effective_overlays:
         return
 
-    overlay_meta = OVERLAY_COMPATIBILITY.get(spec.overlay.key)
-    if overlay_meta is None:
-        raise PlotSpecError(f"Unknown overlay: {spec.overlay.key}")
-    if overlay_meta.item_type != spec.overlay.kind:
-        raise PlotSpecError(f"Overlay '{spec.overlay.key}' does not match kind '{spec.overlay.kind}'.")
-    if spec.x_domain not in overlay_meta.allowed_x_domains:
-        raise PlotSpecError(f"Overlay '{spec.overlay.key}' does not support x-domain '{spec.x_domain}'.")
-
     left_variables = {layer.variable for layer in spec.left_axis}
-    missing_left = [variable for variable in overlay_meta.requires_left_variables if variable not in left_variables]
-    if missing_left:
-        raise PlotSpecError(
-            f"Overlay '{spec.overlay.key}' requires left-axis variables: {', '.join(missing_left)}"
-        )
+    for overlay in effective_overlays:
+        overlay_meta = OVERLAY_COMPATIBILITY.get(overlay.key)
+        if overlay_meta is None:
+            raise PlotSpecError(f"Unknown overlay: {overlay.key}")
+        if overlay_meta.item_type != overlay.kind:
+            raise PlotSpecError(f"Overlay '{overlay.key}' does not match kind '{overlay.kind}'.")
+        if spec.x_domain not in overlay_meta.allowed_x_domains:
+            raise PlotSpecError(f"Overlay '{overlay.key}' does not support x-domain '{spec.x_domain}'.")
+
+        missing_left = [variable for variable in overlay_meta.requires_left_variables if variable not in left_variables]
+        if missing_left:
+            raise PlotSpecError(
+                f"Overlay '{overlay.key}' requires left-axis variables: {', '.join(missing_left)}"
+            )
 
 
 def expand_composed_graph_spec(spec: CustomGraphSpec) -> list[ResolvedComposedGraphJob]:
@@ -217,7 +242,7 @@ def expand_composed_graph_spec(spec: CustomGraphSpec) -> list[ResolvedComposedGr
             x_label=spec.x_domain,
             left_layers=list(spec.left_axis),
             right_layer=spec.right_axis,
-            overlay=spec.overlay,
+            overlays=_effective_composed_overlays(spec),
             band_mode=spec.band_mode,
         )
     ]
@@ -997,23 +1022,24 @@ def _plot_composed_trace_job(
         ax_right.set_ylabel(axis_label(job.right_layer.variable))
         ax_right.grid(False)
 
-    if job.overlay is not None and job.left_layers:
+    if job.overlays and job.left_layers:
         overlay_ref_col = _require_column(trace_df, job.left_layers[0].variable)
-        overlay_artist_state = _capture_axis_artist_state(ax_left)
-        try:
-            overlay_warning = _render_composed_overlay(
-                ax_left,
-                trace_df,
-                qc_lookup,
-                x_col,
-                overlay_ref_col,
-                job.overlay,
-            )
-        except Exception as exc:
-            _restore_axis_artist_state(ax_left, overlay_artist_state)
-            overlay_warning = str(exc) or f"overlay '{job.overlay.key}' skipped during rendering."
-        if overlay_warning is not None:
-            warnings.append(f"{job.spec_title}: {overlay_warning}")
+        for overlay in job.overlays:
+            overlay_artist_state = _capture_axis_artist_state(ax_left)
+            try:
+                overlay_warning = _render_composed_overlay(
+                    ax_left,
+                    trace_df,
+                    qc_lookup,
+                    x_col,
+                    overlay_ref_col,
+                    overlay,
+                )
+            except Exception as exc:
+                _restore_axis_artist_state(ax_left, overlay_artist_state)
+                overlay_warning = str(exc) or f"overlay '{overlay.key}' skipped during rendering."
+            if overlay_warning is not None:
+                warnings.append(f"{job.spec_title}: {overlay_warning}")
 
     ax_left.set_xlabel(axis_label(job.x_label))
     ax_left.set_ylabel(" / ".join(axis_label(layer.variable) for layer in job.left_layers))

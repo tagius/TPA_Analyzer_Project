@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from tpa_analyzer.core.errors import PlotSpecError
+from tpa_analyzer.core.exporting import export_plot_bundle
 from tpa_analyzer.core.models import (
     CustomGraphAxisLayer,
     CustomGraphOverlay,
@@ -16,13 +17,14 @@ from tpa_analyzer.core.models import (
     GraphSpec,
     PlotStyleConfig,
 )
-from tpa_analyzer.core.exporting import export_plot_bundle
 from tpa_analyzer.plotting.engine import (
+    expand_composed_graph_spec,
     expand_graph_spec_jobs,
     normalize_graph_spec,
     plot_custom_graphs,
     validate_graph_spec,
 )
+from tpa_analyzer.core.session import migrate_graph_specs
 from tpa_analyzer.ui.app import filter_assigned_plot_export_payload
 
 
@@ -141,6 +143,7 @@ def test_plot_custom_graphs_renders_one_dual_axis_composed_trace_plot(tmp_path) 
     payload = plot_custom_graphs(
         trace_df=trace_df,
         metrics_df=pd.DataFrame(),
+        qc_df=pd.DataFrame(),
         graph_specs=[spec],
         style=PlotStyleConfig(),
         output_dir=tmp_path,
@@ -153,6 +156,102 @@ def test_plot_custom_graphs_renders_one_dual_axis_composed_trace_plot(tmp_path) 
     assert Path(payload["paths"][0]).exists()
 
 
+def test_expand_composed_graph_spec_rejects_incompatible_left_axis_units() -> None:
+    """Composed graphs should reject left-axis variables with different units."""
+    spec = CustomGraphSpec(
+        title="Mixed Left Axis",
+        x_domain="Time (s)",
+        left_axis=[
+            CustomGraphAxisLayer(variable="Force (N)", role="left"),
+            CustomGraphAxisLayer(variable="Deformation (mm)", role="left"),
+        ],
+    )
+
+    with pytest.raises(PlotSpecError):
+        expand_composed_graph_spec(spec)
+
+
+def test_plot_custom_graphs_generates_unique_filenames_for_duplicate_specs(tmp_path) -> None:
+    """Repeated custom specs should save distinct files instead of overwriting."""
+    trace_df = pd.DataFrame(
+        [
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 0.0, "Force (N)": 1.0},
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 0.5, "Force (N)": 2.0},
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 1.0, "Force (N)": 1.5},
+        ]
+    )
+    repeated_specs = [
+        CustomGraphSpec(
+            title="Repeated Graph",
+            x_domain="Time (s)",
+            left_axis=[CustomGraphAxisLayer(variable="Force (N)", role="left")],
+        ),
+        CustomGraphSpec(
+            title="Repeated Graph",
+            x_domain="Time (s)",
+            left_axis=[CustomGraphAxisLayer(variable="Force (N)", role="left")],
+        ),
+    ]
+
+    payload = plot_custom_graphs(
+        trace_df=trace_df,
+        metrics_df=pd.DataFrame(),
+        qc_df=pd.DataFrame(),
+        graph_specs=repeated_specs,
+        style=PlotStyleConfig(),
+        output_dir=tmp_path,
+        figure_config=FigureConfig(dpi=72),
+        group_order=["Control"],
+    )
+
+    assert len(payload["paths"]) == 2
+    assert payload["warnings"] == []
+    assert len({Path(path).name for path in payload["paths"]}) == 2
+    assert all(Path(path).exists() for path in payload["paths"])
+
+
+def test_plot_custom_graphs_renders_composed_overlay_from_qc_df(tmp_path) -> None:
+    """Overlay recipes should use QC summary markers instead of trace columns."""
+    trace_df = pd.DataFrame(
+        [
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 0.0, "Force Corrected (N)": 1.0},
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 0.5, "Force Corrected (N)": 2.0},
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 1.0, "Force Corrected (N)": 1.5},
+        ]
+    )
+    qc_df = pd.DataFrame(
+        [
+            {
+                "Filename": "a.csv",
+                "Group": "Control",
+                "Bite1 Start Index": 0,
+                "Peak1 Index": 1,
+            }
+        ]
+    )
+    spec = CustomGraphSpec(
+        title="Overlay From QC",
+        x_domain="Time (s)",
+        left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+        overlay=CustomGraphOverlay(kind="segment", key="b1_start_to_peak1"),
+    )
+
+    payload = plot_custom_graphs(
+        trace_df=trace_df,
+        metrics_df=pd.DataFrame(),
+        qc_df=qc_df,
+        graph_specs=[spec],
+        style=PlotStyleConfig(),
+        output_dir=tmp_path,
+        figure_config=FigureConfig(dpi=72),
+        group_order=["Control"],
+    )
+
+    assert len(payload["paths"]) == 1
+    assert Path(payload["paths"][0]).exists()
+    assert payload["warnings"] == []
+
+
 def test_plot_custom_graphs_warns_when_composed_overlay_prereqs_are_missing(tmp_path) -> None:
     """Overlay recipes should warn narrowly when required QC data is unavailable."""
     trace_df = pd.DataFrame(
@@ -162,6 +261,7 @@ def test_plot_custom_graphs_warns_when_composed_overlay_prereqs_are_missing(tmp_
             {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 1.0, "Force Corrected (N)": 1.5},
         ]
     )
+    qc_df = pd.DataFrame([{"Filename": "a.csv", "Group": "Control"}])
     spec = CustomGraphSpec(
         title="Overlay Missing",
         x_domain="Time (s)",
@@ -172,6 +272,7 @@ def test_plot_custom_graphs_warns_when_composed_overlay_prereqs_are_missing(tmp_
     payload = plot_custom_graphs(
         trace_df=trace_df,
         metrics_df=pd.DataFrame(),
+        qc_df=qc_df,
         graph_specs=[spec],
         style=PlotStyleConfig(),
         output_dir=tmp_path,
@@ -185,6 +286,58 @@ def test_plot_custom_graphs_warns_when_composed_overlay_prereqs_are_missing(tmp_
     assert "Overlay Missing" in payload["warnings"][0]
     assert "overlay" in payload["warnings"][0].lower()
     assert "missing" in payload["warnings"][0].lower()
+
+
+def test_plot_custom_graphs_renders_migrated_legacy_overlays(tmp_path) -> None:
+    """Migrated legacy segment and annotation overlays should still render."""
+    trace_df = pd.DataFrame(
+        [
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 0.0, "Force Corrected (N)": 1.0},
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 0.5, "Force Corrected (N)": 2.0},
+            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 1.0, "Force Corrected (N)": 1.5},
+        ]
+    )
+    qc_df = pd.DataFrame(
+        [
+            {
+                "Filename": "a.csv",
+                "Group": "Control",
+                "Bite1 Start Index": 0,
+                "Peak1 Index": 1,
+            }
+        ]
+    )
+    migrated_specs = migrate_graph_specs(
+        [
+            {
+                "title": "Legacy Segment",
+                "x_domain": "Time (s)",
+                "left_axis": [{"variable": "Force Corrected (N)", "role": "left"}],
+                "overlay": {"kind": "segment", "key": "b1_start_to_peak1"},
+            },
+            {
+                "title": "Legacy Annotation",
+                "x_domain": "Time (s)",
+                "left_axis": [{"variable": "Force Corrected (N)", "role": "left"}],
+                "overlay": {"kind": "annotation", "key": "hardness_peak1"},
+            },
+        ]
+    )
+
+    payload = plot_custom_graphs(
+        trace_df=trace_df,
+        metrics_df=pd.DataFrame(),
+        qc_df=qc_df,
+        graph_specs=migrated_specs,
+        style=PlotStyleConfig(),
+        output_dir=tmp_path,
+        figure_config=FigureConfig(dpi=72),
+        group_order=["Control"],
+    )
+
+    assert len(payload["paths"]) == 2
+    assert all(Path(path).exists() for path in payload["paths"])
+    assert payload["warnings"] == []
 
 
 def test_plot_custom_graphs_overlay_warning_does_not_abort_other_specs(tmp_path) -> None:
@@ -211,6 +364,7 @@ def test_plot_custom_graphs_overlay_warning_does_not_abort_other_specs(tmp_path)
     payload = plot_custom_graphs(
         trace_df=trace_df,
         metrics_df=pd.DataFrame(),
+        qc_df=pd.DataFrame([{"Filename": "a.csv", "Group": "Control"}]),
         graph_specs=[overlay_spec, valid_spec],
         style=PlotStyleConfig(),
         output_dir=tmp_path,
@@ -235,8 +389,6 @@ def test_plot_custom_graphs_overlay_render_failure_warns_and_still_saves_plot(tm
                 "Group": "Control",
                 "Time (s)": 0.0,
                 "Force Corrected (N)": 1.0,
-                "Bite1 Start Index": 0,
-                "Peak1 Index": 0,
             },
             {
                 "File": "a.csv",
@@ -244,9 +396,17 @@ def test_plot_custom_graphs_overlay_render_failure_warns_and_still_saves_plot(tm
                 "Group": "Control",
                 "Time (s)": 0.5,
                 "Force Corrected (N)": 2.0,
+            },
+        ]
+    )
+    qc_df = pd.DataFrame(
+        [
+            {
+                "Filename": "a.csv",
+                "Group": "Control",
                 "Bite1 Start Index": 0,
                 "Peak1 Index": 1,
-            },
+            }
         ]
     )
     spec = CustomGraphSpec(
@@ -267,6 +427,7 @@ def test_plot_custom_graphs_overlay_render_failure_warns_and_still_saves_plot(tm
     payload = plot_custom_graphs(
         trace_df=trace_df,
         metrics_df=pd.DataFrame(),
+        qc_df=qc_df,
         graph_specs=[spec],
         style=PlotStyleConfig(),
         output_dir=tmp_path,
@@ -305,6 +466,94 @@ def test_export_plot_bundle_warns_instead_of_aborting_when_trace_exports_are_una
     assert any("overlay" in warning.lower() for warning in warnings)
 
 
+def test_export_plot_bundle_renders_custom_overlay_from_qc_df(tmp_path) -> None:
+    """Batch export should pass QC summary markers into custom overlay rendering."""
+    trace_df = pd.DataFrame(
+        [
+            {
+                "File": "a.csv",
+                "Filename": "a.csv",
+                "Group": "Control",
+                "Time (s)": 0.0,
+                "Aligned Time (s)": 0.0,
+                "Force (N)": 0.5,
+                "Force Corrected (N)": 0.4,
+                "Deformation (mm)": 0.1,
+                "True Stress (kPa)": 1.0,
+                "True Strain (%)": 0.0,
+            },
+            {
+                "File": "a.csv",
+                "Filename": "a.csv",
+                "Group": "Control",
+                "Time (s)": 0.5,
+                "Aligned Time (s)": 0.5,
+                "Force (N)": 1.2,
+                "Force Corrected (N)": 1.1,
+                "Deformation (mm)": 0.2,
+                "True Stress (kPa)": 2.0,
+                "True Strain (%)": 2.5,
+            },
+            {
+                "File": "a.csv",
+                "Filename": "a.csv",
+                "Group": "Control",
+                "Time (s)": 1.0,
+                "Aligned Time (s)": 1.0,
+                "Force (N)": 0.8,
+                "Force Corrected (N)": 0.7,
+                "Deformation (mm)": 0.3,
+                "True Stress (kPa)": 1.5,
+                "True Strain (%)": 5.0,
+            },
+        ]
+    )
+    qc_df = pd.DataFrame(
+        [
+            {
+                "Filename": "a.csv",
+                "Group": "Control",
+                "Trigger Force (N)": 0.2,
+                "Modulus Strain Min (%)": 0.0,
+                "Modulus Strain Max (%)": 5.0,
+                "Peak1 Index": 1,
+                "Peak2 Index": 2,
+                "Bite1 Start Index": 0,
+                "Bite1 End Index": 1,
+                "Bite2 Start Index": 2,
+                "Bite2 End Index": 2,
+            }
+        ]
+    )
+    graph_specs = [
+        CustomGraphSpec(
+            title="Overlay Export",
+            x_domain="Time (s)",
+            left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+            overlay=CustomGraphOverlay(kind="segment", key="b1_start_to_peak1"),
+        )
+    ]
+
+    warnings = export_plot_bundle(
+        root=tmp_path,
+        trace_df=trace_df,
+        metrics_df=pd.DataFrame(),
+        qc_df=qc_df,
+        stats_results={},
+        graph_specs=graph_specs,
+        style=PlotStyleConfig(),
+        fig_cfg=FigureConfig(dpi=72),
+        overlay_mode="mean_band",
+        band_mode="sd",
+        group_order=["Control"],
+        include_plots_dir=False,
+    )
+
+    custom_paths = list((tmp_path / "custom").glob("*.png"))
+    assert warnings == []
+    assert len(custom_paths) == 1
+
+
 def test_plot_custom_graphs_warns_for_none_payload_and_continues(tmp_path) -> None:
     """Malformed saved specs should warn per-spec and not abort later valid specs."""
     trace_df = pd.DataFrame(
@@ -324,6 +573,7 @@ def test_plot_custom_graphs_warns_for_none_payload_and_continues(tmp_path) -> No
     payload = plot_custom_graphs(
         trace_df=trace_df,
         metrics_df=pd.DataFrame(),
+        qc_df=pd.DataFrame(),
         graph_specs=[None, valid_spec],
         style=PlotStyleConfig(),
         output_dir=tmp_path,

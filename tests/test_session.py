@@ -142,6 +142,31 @@ def test_migrate_custom_graph_specs_deduplicates_annotation_overlay() -> None:
     assert spec.annotations == [CustomGraphAnnotation(kind="annotation", key="hardness_peak1")]
 
 
+def test_migrate_custom_graph_specs_deduplicates_existing_annotation_list() -> None:
+    payload = [
+        {
+            "title": "Legacy Annotation Duplicates",
+            "x_domain": "Time (s)",
+            "left_axis": [{"variable": "Force Corrected (N)", "role": "left"}],
+            "annotations": [
+                {"kind": "annotation", "key": "hardness_peak1"},
+                {"kind": "annotation", "key": "hardness_peak1"},
+                {"kind": "annotation", "key": "adhesiveness"},
+            ],
+            "overlay": {"kind": "annotation", "key": "hardness_peak1"},
+        }
+    ]
+
+    migrated = migrate_graph_specs(payload)
+
+    spec = migrated[0]
+    assert isinstance(spec, CustomGraphSpec)
+    assert spec.annotations == [
+        CustomGraphAnnotation(kind="annotation", key="hardness_peak1"),
+        CustomGraphAnnotation(kind="annotation", key="adhesiveness"),
+    ]
+
+
 def test_custom_graph_spec_requires_segment_key_for_semantic_segment_domain() -> None:
     with pytest.raises(ValueError, match="segment_key"):
         CustomGraphSpec(
