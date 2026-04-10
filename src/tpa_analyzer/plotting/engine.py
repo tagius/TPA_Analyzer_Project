@@ -26,7 +26,7 @@ from tpa_analyzer.core.models import (
     GraphSpec,
     PlotStyleConfig,
 )
-from tpa_analyzer.plotting.custom_graphs import OVERLAY_COMPATIBILITY
+from tpa_analyzer.plotting.custom_graphs import OVERLAY_COMPATIBILITY, SEMANTIC_SEGMENTS
 from tpa_analyzer.plotting.registry import VARIABLE_REGISTRY, axis_label, registry_entry
 
 
@@ -54,6 +54,12 @@ class ResolvedComposedGraphJob:
     right_layer: CustomGraphAxisLayer | None
     overlays: list[CustomGraphOverlay]
     band_mode: str
+    segment_key: str | None
+    annotations: list[CustomGraphAnnotation]
+    data_scope: str
+    selected_samples: list[str]
+    display_mode: str
+    rebase_x: bool
 
 
 def _graph_spec_title(spec: Any) -> str:
@@ -205,6 +211,12 @@ def validate_composed_graph_spec(spec: CustomGraphSpec) -> None:
     if len(left_units) > 1:
         raise PlotSpecError("Left-axis variables must share the same unit.")
 
+    if spec.view_domain == "semantic_segment":
+        if spec.segment_key not in SEMANTIC_SEGMENTS:
+            raise PlotSpecError(f"Unknown semantic segment: {spec.segment_key}")
+        if not spec.rebase_x:
+            raise PlotSpecError("Semantic segment graphs must rebase the X axis.")
+
     for layer in [*spec.left_axis, *([spec.right_axis] if spec.right_axis is not None else [])]:
         if layer.variable not in VARIABLE_REGISTRY:
             raise PlotSpecError(f"Unknown Y variable: {layer.variable}")
@@ -246,6 +258,12 @@ def expand_composed_graph_spec(spec: CustomGraphSpec) -> list[ResolvedComposedGr
             right_layer=spec.right_axis,
             overlays=_effective_composed_overlays(spec),
             band_mode=spec.band_mode,
+            segment_key=spec.segment_key,
+            annotations=list(spec.annotations),
+            data_scope=spec.data_scope,
+            selected_samples=list(spec.selected_samples),
+            display_mode=spec.display_mode,
+            rebase_x=spec.rebase_x,
         )
     ]
 
@@ -838,6 +856,57 @@ def _overlay_index(frame: pd.DataFrame, row: pd.Series | None, column: str) -> i
     return int(np.clip(index, 0, max(len(frame) - 1, 0)))
 
 
+def segment_index_columns(segment_key: str) -> tuple[str, str]:
+    """Return the QC index columns for one semantic segment."""
+    segment = SEMANTIC_SEGMENTS.get(segment_key)
+    if segment is None:
+        raise PlotSpecError(f"Unknown semantic segment: {segment_key}")
+    if len(segment.qc_columns) != 2:
+        raise PlotSpecError(f"Semantic segment '{segment_key}' does not define two QC columns.")
+    start_column, end_column = segment.qc_columns
+    return start_column, end_column
+
+
+def _rebase_overlay_row(row: pd.Series, offset: int) -> pd.Series:
+    """Shift QC index columns so they line up with a sliced segment frame."""
+    if offset <= 0:
+        return row.copy()
+
+    rebased = row.copy()
+    for column in rebased.index:
+        if not str(column).endswith("Index"):
+            continue
+        value = rebased.get(column)
+        if pd.isna(value):
+            continue
+        try:
+            rebased[column] = int(float(value)) - offset
+        except (TypeError, ValueError):
+            continue
+    return rebased
+
+
+def _slice_trace_to_segment(
+    frame: pd.DataFrame,
+    qc_row: pd.Series,
+    segment_key: str,
+    x_label: str,
+    *,
+    rebase_x: bool,
+) -> pd.DataFrame:
+    start_column, end_column = segment_index_columns(segment_key)
+    start_idx = _overlay_index(frame, qc_row, start_column)
+    end_idx = _overlay_index(frame, qc_row, end_column)
+    if start_idx is None or end_idx is None or end_idx < start_idx:
+        raise PlotSpecError(f"segment '{segment_key}' is unavailable for this sample")
+
+    sliced = frame.iloc[start_idx : end_idx + 1].copy()
+    x_col = _require_column(sliced, x_label)
+    if rebase_x and not sliced.empty:
+        sliced[x_col] = (sliced[x_col].astype(float) - float(sliced[x_col].iloc[0])).round(10)
+    return sliced
+
+
 def _render_composed_overlay(
     ax: Any,
     trace_df: pd.DataFrame,
@@ -994,12 +1063,49 @@ def _plot_composed_trace_job(
     fig, ax_left = plt.subplots(1, 1, figsize=figure_config.resolve_size())
     ax_right = None
     warnings: list[str] = []
+    render_trace_df = trace_df
+    render_qc_lookup = qc_lookup
+
+    if job.segment_key and job.rebase_x:
+        segment_frames: list[pd.DataFrame] = []
+        segment_qc_lookup: dict[str, pd.Series] = {}
+        start_column, _ = segment_index_columns(job.segment_key)
+        for file_key, raw_frame in trace_df.groupby("File", sort=False):
+            frame = raw_frame.sort_values(x_col).reset_index(drop=True)
+            if frame.empty:
+                continue
+            qc_row = qc_lookup.get(str(file_key).strip())
+            if qc_row is None and "Filename" in frame.columns:
+                qc_row = qc_lookup.get(str(frame["Filename"].iloc[0]).strip())
+            if qc_row is None:
+                continue
+            start_idx = _overlay_index(frame, qc_row, start_column)
+            if start_idx is None:
+                continue
+            try:
+                segment_frame = _slice_trace_to_segment(frame, qc_row, job.segment_key, job.x_label, rebase_x=job.rebase_x)
+            except PlotSpecError:
+                continue
+            segment_frame = segment_frame.copy()
+            segment_frame["File"] = frame["File"].iloc[0]
+            if "Filename" in frame.columns:
+                segment_frame["Filename"] = frame["Filename"].iloc[0]
+            if "Group" in frame.columns:
+                segment_frame["Group"] = frame["Group"].iloc[0]
+            segment_frames.append(segment_frame)
+            segment_qc_lookup[str(file_key).strip()] = _rebase_overlay_row(qc_row, start_idx)
+        if not segment_frames:
+            raise PlotSpecError(f"segment '{job.segment_key}' is unavailable for this sample")
+        render_trace_df = pd.concat(segment_frames, ignore_index=True)
+        render_qc_lookup = segment_qc_lookup
+
+    x_col = _require_column(render_trace_df, job.x_label)
 
     for layer in job.left_layers:
-        y_col = _require_column(trace_df, layer.variable)
+        y_col = _require_column(render_trace_df, layer.variable)
         _apply_curve_mode(
             ax_left,
-            trace_df,
+            render_trace_df,
             x_col,
             y_col,
             style,
@@ -1009,11 +1115,11 @@ def _plot_composed_trace_job(
         )
 
     if job.right_layer is not None:
-        right_col = _require_column(trace_df, job.right_layer.variable)
+        right_col = _require_column(render_trace_df, job.right_layer.variable)
         ax_right = ax_left.twinx()
         _apply_curve_mode(
             ax_right,
-            trace_df,
+            render_trace_df,
             x_col,
             right_col,
             style,
@@ -1025,14 +1131,14 @@ def _plot_composed_trace_job(
         ax_right.grid(False)
 
     if job.overlays and job.left_layers:
-        overlay_ref_col = _require_column(trace_df, job.left_layers[0].variable)
+        overlay_ref_col = _require_column(render_trace_df, job.left_layers[0].variable)
         for overlay in job.overlays:
             overlay_artist_state = _capture_axis_artist_state(ax_left)
             try:
                 overlay_warning = _render_composed_overlay(
                     ax_left,
-                    trace_df,
-                    qc_lookup,
+                    render_trace_df,
+                    render_qc_lookup,
                     x_col,
                     overlay_ref_col,
                     overlay,
