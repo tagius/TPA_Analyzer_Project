@@ -159,6 +159,14 @@ class CustomGraphOverlay:
     key: str
 
 
+@dataclass(frozen=True)
+class CustomGraphAnnotation:
+    """A persisted annotation recipe for a custom graph."""
+
+    kind: Literal["annotation"]
+    key: str
+
+
 @dataclass
 class CustomGraphSpec:
     """Typed custom graph configuration saved by the plot builder."""
@@ -167,9 +175,16 @@ class CustomGraphSpec:
     x_domain: str
     left_axis: list[CustomGraphAxisLayer] = field(default_factory=list)
     right_axis: CustomGraphAxisLayer | None = None
-    overlay: CustomGraphOverlay | None = None
+    view_domain: Literal["full_curve", "semantic_segment"] = "full_curve"
+    segment_key: str | None = None
+    rebase_x: bool = False
+    annotations: list[CustomGraphAnnotation] = field(default_factory=list)
+    data_scope: Literal["grouped", "selected_samples"] = "grouped"
+    selected_samples: list[str] = field(default_factory=list)
+    display_mode: Literal["stacked", "individual"] = "stacked"
     enabled: bool = True
     band_mode: TraceBandMode = "sd"
+    overlay: CustomGraphOverlay | None = None
 
     def __post_init__(self) -> None:
         """Validate that axis layers are assigned to the intended side."""
@@ -178,6 +193,11 @@ class CustomGraphSpec:
                 raise ValueError("left_axis layers must have role='left'.")
         if self.right_axis is not None and self.right_axis.role != "right":
             raise ValueError("right_axis must have role='right'.")
+        if self.view_domain == "semantic_segment":
+            if not str(self.segment_key or "").strip():
+                raise ValueError("semantic_segment graphs require a segment_key.")
+            if not self.rebase_x:
+                raise ValueError("semantic_segment graphs require rebase_x=True.")
 
 
 @dataclass

@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from tpa_analyzer.core.models import CustomGraphAxisLayer, CustomGraphOverlay, CustomGraphSpec, GraphSpec
+from tpa_analyzer.core.models import (
+    CustomGraphAnnotation,
+    CustomGraphAxisLayer,
+    CustomGraphOverlay,
+    CustomGraphSpec,
+    GraphSpec,
+)
 from tpa_analyzer.core.errors import SessionError
 from tpa_analyzer.core import session as session_module
 from tpa_analyzer.core.session import load_session_data, migrate_graph_specs, save_session_data
@@ -49,7 +55,52 @@ def test_migrate_graph_specs_preserves_composed_payload() -> None:
     assert isinstance(specs[0], CustomGraphSpec)
     assert specs[0].left_axis[0] == CustomGraphAxisLayer(variable="Force (N)", role="left", curve_mode="mean_band")
     assert specs[0].right_axis == CustomGraphAxisLayer(variable="Deformation (mm)", role="right", curve_mode="individual")
-    assert specs[0].overlay == CustomGraphOverlay(kind="segment", key="markers")
+    assert specs[0].view_domain == "semantic_segment"
+    assert specs[0].segment_key == "markers"
+    assert specs[0].rebase_x is True
+    assert specs[0].overlay is None
+
+
+def test_migrate_graph_specs_promotes_overlay_recipe_to_segment_fields() -> None:
+    payload = [
+        {
+            "title": "Legacy Overlay",
+            "x_domain": "Time (s)",
+            "left_axis": [{"variable": "Force Corrected (N)", "role": "left"}],
+            "overlay": {"kind": "segment", "key": "b1_start_to_peak1"},
+            "band_mode": "sd",
+        }
+    ]
+
+    migrated = migrate_graph_specs(payload)
+
+    spec = migrated[0]
+    assert isinstance(spec, CustomGraphSpec)
+    assert spec.view_domain == "semantic_segment"
+    assert spec.segment_key == "b1_start_to_peak1"
+    assert spec.rebase_x is True
+    assert spec.annotations == []
+    assert spec.data_scope == "grouped"
+
+
+def test_migrate_custom_graph_specs_promotes_annotation_overlay_to_annotations() -> None:
+    payload = [
+        {
+            "title": "Legacy Annotation",
+            "x_domain": "Time (s)",
+            "left_axis": [{"variable": "Force Corrected (N)", "role": "left"}],
+            "overlay": {"kind": "annotation", "key": "hardness_peak1"},
+        }
+    ]
+
+    migrated = migrate_graph_specs(payload)
+
+    spec = migrated[0]
+    assert isinstance(spec, CustomGraphSpec)
+    assert spec.view_domain == "full_curve"
+    assert spec.segment_key is None
+    assert spec.rebase_x is False
+    assert spec.annotations == [CustomGraphAnnotation(kind="annotation", key="hardness_peak1")]
 
 
 def test_migrate_graph_specs_propagates_unexpected_errors(monkeypatch: pytest.MonkeyPatch) -> None:
