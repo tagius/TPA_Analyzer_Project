@@ -14,7 +14,11 @@ from tpa_analyzer.core.models import (
     CustomGraphSpec,
     GraphSpec,
 )
-from tpa_analyzer.plotting.engine import normalize_composed_graph_spec, normalize_graph_spec, serialize_graph_specs
+from tpa_analyzer.plotting.engine import (
+    normalize_composed_graph_spec,
+    normalize_graph_spec,
+    serialize_graph_specs,
+)
 
 
 def session_path(directory: Path) -> Path:
@@ -141,7 +145,9 @@ def migrate_graph_specs(raw_specs: list[Any]) -> list[GraphSpec | CustomGraphSpe
         try:
             migrated.append(_normalize_session_graph_spec(item))
         except (PlotSpecError, TypeError, ValueError) as exc:
-            raise SessionError(f"Session restore failed: invalid graph spec payload at index {index}.") from exc
+            raise SessionError(
+                f"Session restore failed: invalid graph spec payload at index {index}."
+            ) from exc
     return migrated
 
 

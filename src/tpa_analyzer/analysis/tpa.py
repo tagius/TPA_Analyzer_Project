@@ -244,11 +244,12 @@ def calculate_tpa(
     else:
         comp_mask = np.zeros(len(work_df), dtype=bool)
         comp_mask[bite1_start : peak1_idx + 1] = True
-        strain_mask = (
-            (true_strain_pct >= config.modulus_strain_min_pct)
-            & (true_strain_pct <= config.modulus_strain_max_pct)
+        strain_mask = (true_strain_pct >= config.modulus_strain_min_pct) & (
+            true_strain_pct <= config.modulus_strain_max_pct
         )
-        fit_mask = comp_mask & strain_mask & np.isfinite(true_stress_kpa) & np.isfinite(true_strain_pct)
+        fit_mask = (
+            comp_mask & strain_mask & np.isfinite(true_stress_kpa) & np.isfinite(true_strain_pct)
+        )
 
         if int(fit_mask.sum()) >= 2:
             modulus_fit_points = int(fit_mask.sum())

@@ -6,7 +6,7 @@ import copy
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pandas as pd
 from textual import events, on, work
@@ -78,15 +78,24 @@ from tpa_analyzer.ui.layout import resolve_layout_mode
 PARAM_INFO: dict[str, dict[str, str]] = {
     "sample_height": {
         "label": "Sample Height (mm)",
-        "help": "Initial sample thickness before compression. Used to compute true strain and modulus.",
+        "help": (
+            "Initial sample thickness before compression. "
+            "Used to compute true strain and modulus."
+        ),
     },
     "contact_area": {
         "label": "Contact Area (mm2)",
-        "help": "Contact surface area between probe and sample. Used to convert force into true stress.",
+        "help": (
+            "Contact surface area between probe and sample. "
+            "Used to convert force into true stress."
+        ),
     },
     "baseline_points": {
         "label": "Baseline Points",
-        "help": "Number of first points used to estimate force baseline offset before peak detection.",
+        "help": (
+            "Number of first points used to estimate force "
+            "baseline offset before peak detection."
+        ),
     },
     "trigger_force": {
         "label": "Trigger Force (N)",
@@ -166,11 +175,15 @@ def _eligible_left_axis_variables_for_selection(
 ) -> list[str]:
     """Return left-axis variables compatible with the current selection."""
     eligible = eligible_left_axis_variables(x_domain=x_domain, analysis_ready=analysis_ready)
-    selected = [str(variable).strip() for variable in selected_left_variables if str(variable).strip()]
+    selected = [
+        str(variable).strip() for variable in selected_left_variables if str(variable).strip()
+    ]
     if not selected:
         return eligible
 
-    selected_units = {registry_entry(variable).unit for variable in selected if registry_entry(variable).unit}
+    selected_units = {
+        registry_entry(variable).unit for variable in selected if registry_entry(variable).unit
+    }
     if len(selected_units) != 1:
         return eligible
 
@@ -254,7 +267,9 @@ def filter_assigned_plot_export_payload(
             pairwise_df = pairwise_df.copy()
             for column in ("Group1", "Group2"):
                 if column in pairwise_df.columns:
-                    pairwise_df = pairwise_df.loc[pairwise_df[column].fillna("").astype(str).str.strip().ne("")]
+                    pairwise_df = pairwise_df.loc[
+                        pairwise_df[column].fillna("").astype(str).str.strip().ne("")
+                    ]
         else:
             pairwise_df = pd.DataFrame()
         if summary_df.empty:
@@ -274,7 +289,7 @@ def filter_assigned_plot_export_payload(
 class ParameterInfoModal(ModalScreen[None]):
     """Simple accessibility modal for parameter help text."""
 
-    BINDINGS = [
+    BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
         ("escape", "dismiss_modal", "Close"),
         ("enter", "dismiss_modal", "Close"),
         ("q", "dismiss_modal", "Close"),
@@ -420,7 +435,7 @@ class TPAAnalyzerApp(App):
     }
     """
 
-    BINDINGS = [
+    BINDINGS: ClassVar[list[tuple[str, str, str]]] = [
         ("space", "toggle_highlighted_file_selection", "Toggle File"),
         ("q", "quit", "Quit"),
         ("escape", "quit", "Quit"),
@@ -459,10 +474,16 @@ class TPAAnalyzerApp(App):
             with VerticalScroll(id="left-pane", classes="pane"):
                 yield Static("Data & Grouping", classes="section-title")
                 yield Label("Directory", classes="small-label")
-                yield Input(value=str(self.settings.default_data_dir), id="input_dir", placeholder="Relative or absolute path")
+                yield Input(
+                    value=str(self.settings.default_data_dir),
+                    id="input_dir",
+                    placeholder="Relative or absolute path",
+                )
                 yield Button("Refresh Directory", id="btn_refresh", variant="primary")
                 yield Label("Detected Files", classes="small-label")
-                yield DataTable(id="file_list", cursor_type="row", show_row_labels=False, zebra_stripes=False)
+                yield DataTable(
+                    id="file_list", cursor_type="row", show_row_labels=False, zebra_stripes=False
+                )
                 yield Static("Selected: none", id="selected_file_info", classes="small-label")
                 yield Static("Selected files: 0", id="selected_file_count", classes="small-label")
                 yield Static("Groups: none", id="group_summary", classes="small-label")
@@ -478,11 +499,15 @@ class TPAAnalyzerApp(App):
                     yield Button("Rename Group", id="btn_group_rename")
                     yield Button("Delete Group", id="btn_group_delete", variant="warning")
                 with Horizontal(classes="action-row"):
-                    yield Button("Assign to Active Group", id="btn_assign_active", variant="success")
+                    yield Button(
+                        "Assign to Active Group", id="btn_assign_active", variant="success"
+                    )
                     yield Button("Clear Assignment", id="btn_clear_assignment", variant="warning")
                 yield Static("Color Style", classes="section-title")
                 yield Label("Target Group", classes="small-label")
-                yield Select([("No groups", "__none__")], id="select_color_group", allow_blank=False)
+                yield Select(
+                    [("No groups", "__none__")], id="select_color_group", allow_blank=False
+                )
                 yield Label("Group Hex", classes="small-label")
                 yield Input(value="#2563EB", id="input_group_hex", placeholder="#RRGGBB")
                 with Horizontal(classes="action-row"):
@@ -518,7 +543,11 @@ class TPAAnalyzerApp(App):
                         yield Input(value="30", id="input_mod_max")
                         yield Label(PARAM_INFO["stats_mode"]["label"], classes="small-label")
                         yield Select(
-                            [("Auto", "auto"), ("Parametric", "parametric"), ("Nonparametric", "nonparametric")],
+                            [
+                                ("Auto", "auto"),
+                                ("Parametric", "parametric"),
+                                ("Nonparametric", "nonparametric"),
+                            ],
                             value="auto",
                             id="select_stats_mode",
                             allow_blank=False,
@@ -528,7 +557,10 @@ class TPAAnalyzerApp(App):
                     with TabPane("Plot Builder"):
                         yield Label("View Domain", classes="small-label")
                         yield Select(
-                            [("Full Curve", "full_curve"), ("Semantic Segment", "semantic_segment")],
+                            [
+                                ("Full Curve", "full_curve"),
+                                ("Semantic Segment", "semantic_segment"),
+                            ],
                             value="full_curve",
                             id="select_custom_view_domain",
                             allow_blank=False,
@@ -540,7 +572,11 @@ class TPAAnalyzerApp(App):
                             id="select_custom_segment",
                             allow_blank=False,
                         )
-                        yield Label("Segment Regression", classes="small-label", id="label_custom_regression")
+                        yield Label(
+                            "Segment Regression",
+                            classes="small-label",
+                            id="label_custom_regression",
+                        )
                         yield Select(
                             [("None", CUSTOM_GRAPH_NONE)],
                             value=CUSTOM_GRAPH_NONE,
@@ -558,17 +594,30 @@ class TPAAnalyzerApp(App):
                         yield Label("Left Axis (choose up to two)", classes="small-label")
                         with VerticalScroll(id="custom_left_axis_choices", classes="option-box"):
                             for label in TRACE_COMPATIBILITY:
-                                yield Checkbox(label, value=(label == "Force (N)"), classes="custom-left-axis-choice")
+                                yield Checkbox(
+                                    label,
+                                    value=(label == "Force (N)"),
+                                    classes="custom-left-axis-choice",
+                                )
                         yield Label("Right Axis", classes="small-label")
-                        yield Select([("None", CUSTOM_GRAPH_NONE)], value=CUSTOM_GRAPH_NONE, id="select_custom_right_axis", allow_blank=False)
-                        yield Label("Annotations", classes="small-label", id="label_custom_annotation")
+                        yield Select(
+                            [("None", CUSTOM_GRAPH_NONE)],
+                            value=CUSTOM_GRAPH_NONE,
+                            id="select_custom_right_axis",
+                            allow_blank=False,
+                        )
+                        yield Label(
+                            "Annotations", classes="small-label", id="label_custom_annotation"
+                        )
                         yield Select(
                             [("None", CUSTOM_GRAPH_NONE)],
                             value=CUSTOM_GRAPH_NONE,
                             id="select_custom_annotation",
                             allow_blank=False,
                         )
-                        yield Label("Sample Selection", classes="small-label", id="label_custom_sample_list")
+                        yield Label(
+                            "Sample Selection", classes="small-label", id="label_custom_sample_list"
+                        )
                         yield OptionList(id="custom_graph_sample_list", markup=False)
                         yield Label("Display Mode", classes="small-label")
                         yield Select(
@@ -578,7 +627,12 @@ class TPAAnalyzerApp(App):
                             allow_blank=False,
                         )
                         yield Label("Band Type", classes="small-label")
-                        yield Select([("SD", "sd"), ("95% CI", "ci95")], value="sd", id="select_band_mode", allow_blank=False)
+                        yield Select(
+                            [("SD", "sd"), ("95% CI", "ci95")],
+                            value="sd",
+                            id="select_band_mode",
+                            allow_blank=False,
+                        )
                         yield Label("Graph Title", classes="small-label")
                         yield Input(value="Custom Graph", id="input_graph_title")
                         yield Label("Live Summary", classes="small-label")
@@ -593,7 +647,13 @@ class TPAAnalyzerApp(App):
                     with TabPane("Style / Theme"):
                         yield Label("Ratio Preset", classes="small-label")
                         yield Select(
-                            [("1:1", "1:1"), ("4:3", "4:3"), ("16:9", "16:9"), ("A4 portrait", "A4 portrait"), ("A4 landscape", "A4 landscape")],
+                            [
+                                ("1:1", "1:1"),
+                                ("4:3", "4:3"),
+                                ("16:9", "16:9"),
+                                ("A4 portrait", "A4 portrait"),
+                                ("A4 landscape", "A4 landscape"),
+                            ],
                             value="4:3",
                             id="select_ratio",
                             allow_blank=False,
@@ -609,7 +669,11 @@ class TPAAnalyzerApp(App):
                     with TabPane("Export"):
                         yield Label("Baseline Overlay Mode", classes="small-label")
                         yield Select(
-                            [("Mean + Band", "mean_band"), ("Individual", "individual"), ("Both", "both")],
+                            [
+                                ("Mean + Band", "mean_band"),
+                                ("Individual", "individual"),
+                                ("Both", "both"),
+                            ],
                             value="mean_band",
                             id="select_overlay_mode",
                             allow_blank=False,
@@ -671,7 +735,13 @@ class TPAAnalyzerApp(App):
         """Enable or disable the long-running action buttons."""
         if not self._widgets_ready():
             return
-        for button_id in ["#btn_analyze", "#btn_export_tables", "#btn_export_plots", "#btn_export_all", "#btn_refresh"]:
+        for button_id in [
+            "#btn_analyze",
+            "#btn_export_tables",
+            "#btn_export_plots",
+            "#btn_export_all",
+            "#btn_refresh",
+        ]:
             self.query_one(button_id, Button).disabled = disabled
         if disabled:
             self.query_one("#btn_group_up", Button).disabled = True
@@ -743,7 +813,10 @@ class TPAAnalyzerApp(App):
             "schema_version": SESSION_SCHEMA_VERSION,
             "saved_at_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
             "directory": str(self.active_directory) if self.active_directory else "",
-            "file_records": [{"filename": record.get("filename", ""), "group": record.get("group", "")} for record in self.file_records],
+            "file_records": [
+                {"filename": record.get("filename", ""), "group": record.get("group", "")}
+                for record in self.file_records
+            ],
             "group_order": self.group_order.copy(),
             "active_group": self._active_group_name(),
             "selected_file_index": self.selected_file_index,
@@ -789,7 +862,12 @@ class TPAAnalyzerApp(App):
 
     def _autosave_session(self) -> None:
         """Persist the current session when autosave is enabled."""
-        if not self._widgets_ready() or self._loading_session or self.active_directory is None or not self.settings.session_autosave_enabled:
+        if (
+            not self._widgets_ready()
+            or self._loading_session
+            or self.active_directory is None
+            or not self.settings.session_autosave_enabled
+        ):
             return
         try:
             save_session_data(session_path(self.active_directory), self._collect_session_payload())
@@ -798,7 +876,12 @@ class TPAAnalyzerApp(App):
 
     def _has_cached_analysis_results(self) -> bool:
         """Return ``True`` when analysis-derived artifacts are currently cached."""
-        return not self.metrics_df.empty or not self.trace_df.empty or not self.qc_df.empty or bool(self.stats_results)
+        return (
+            not self.metrics_df.empty
+            or not self.trace_df.empty
+            or not self.qc_df.empty
+            or bool(self.stats_results)
+        )
 
     def _invalidate_analysis_results_for_grouping_change(self) -> bool:
         """Clear cached analysis results after a grouping mutation."""
@@ -844,7 +927,11 @@ class TPAAnalyzerApp(App):
                     record["group"] = group_map[filename]
 
             saved_order = data.get("group_order", [])
-            restored_order = [str(group).strip() for group in saved_order if str(group).strip()] if isinstance(saved_order, list) else []
+            restored_order = (
+                [str(group).strip() for group in saved_order if str(group).strip()]
+                if isinstance(saved_order, list)
+                else []
+            )
             self.group_order = restored_order or derive_group_order_from_file_records(files_data)
             valid_groups = set(self.group_order)
             for record in self.file_records:
@@ -858,15 +945,29 @@ class TPAAnalyzerApp(App):
 
             analysis = data.get("analysis_params", {})
             if isinstance(analysis, dict):
-                self._set_input_if_present("#input_height", str(analysis.get("sample_height", "10.0")))
-                self._set_input_if_present("#input_area", str(analysis.get("contact_area", "100.0")))
-                self._set_input_if_present("#input_baseline_points", str(analysis.get("baseline_points", "10")))
-                self._set_input_if_present("#input_trigger", str(analysis.get("trigger_force", "0.05")))
-                self._set_input_if_present("#input_prominence", str(analysis.get("peak_prominence", "0.5")))
-                self._set_input_if_present("#input_peak_distance", str(analysis.get("peak_distance", "200")))
+                self._set_input_if_present(
+                    "#input_height", str(analysis.get("sample_height", "10.0"))
+                )
+                self._set_input_if_present(
+                    "#input_area", str(analysis.get("contact_area", "100.0"))
+                )
+                self._set_input_if_present(
+                    "#input_baseline_points", str(analysis.get("baseline_points", "10"))
+                )
+                self._set_input_if_present(
+                    "#input_trigger", str(analysis.get("trigger_force", "0.05"))
+                )
+                self._set_input_if_present(
+                    "#input_prominence", str(analysis.get("peak_prominence", "0.5"))
+                )
+                self._set_input_if_present(
+                    "#input_peak_distance", str(analysis.get("peak_distance", "200"))
+                )
                 self._set_input_if_present("#input_mod_min", str(analysis.get("modulus_min", "10")))
                 self._set_input_if_present("#input_mod_max", str(analysis.get("modulus_max", "30")))
-                self._set_select_if_present("#select_stats_mode", str(analysis.get("stats_mode", "auto")))
+                self._set_select_if_present(
+                    "#select_stats_mode", str(analysis.get("stats_mode", "auto"))
+                )
 
             builder = data.get("plot_builder", {})
             if isinstance(builder, dict):
@@ -890,19 +991,33 @@ class TPAAnalyzerApp(App):
                     str(builder.get("x_domain", builder.get("trace_x", ["Time (s)"])[0])),
                 )
                 legacy_left_axis = list(builder.get("trace_y", list(DEFAULT_TRACE_Y_VARIABLES)))
-                self._set_custom_left_axis_selections(list(builder.get("left_axis", legacy_left_axis)))
+                self._set_custom_left_axis_selections(
+                    list(builder.get("left_axis", legacy_left_axis))
+                )
                 self._sync_custom_graph_builder_state()
-                self._set_select_if_present("#select_custom_right_axis", str(builder.get("right_axis", CUSTOM_GRAPH_NONE)))
+                self._set_select_if_present(
+                    "#select_custom_right_axis", str(builder.get("right_axis", CUSTOM_GRAPH_NONE))
+                )
                 self._set_select_if_present("#select_custom_segment", segment_key)
                 self._set_select_if_present("#select_custom_regression", regression_value)
                 self._set_select_if_present("#select_custom_annotation", annotation_value)
                 self._custom_graph_selected_samples = [
-                    str(item).strip() for item in builder.get("selected_samples", []) if str(item).strip()
+                    str(item).strip()
+                    for item in builder.get("selected_samples", [])
+                    if str(item).strip()
                 ]
-                self._set_select_if_present("#select_custom_display_mode", str(builder.get("display_mode", "overlay")))
-                self._set_select_if_present("#select_band_mode", str(builder.get("band_mode", "sd")))
-                self._set_input_if_present("#input_graph_title", str(builder.get("graph_title", "Custom Graph")))
-                self._set_select_if_present("#select_overlay_mode", str(builder.get("overlay_mode", "mean_band")))
+                self._set_select_if_present(
+                    "#select_custom_display_mode", str(builder.get("display_mode", "overlay"))
+                )
+                self._set_select_if_present(
+                    "#select_band_mode", str(builder.get("band_mode", "sd"))
+                )
+                self._set_input_if_present(
+                    "#input_graph_title", str(builder.get("graph_title", "Custom Graph"))
+                )
+                self._set_select_if_present(
+                    "#select_overlay_mode", str(builder.get("overlay_mode", "mean_band"))
+                )
                 self._sync_custom_graph_builder_state()
 
             figure = data.get("figure_style", {})
@@ -916,9 +1031,15 @@ class TPAAnalyzerApp(App):
             if isinstance(colors, dict):
                 group_colors = colors.get("group_colors", {})
                 if isinstance(group_colors, dict):
-                    self.plot_style.group_colors = {str(key): str(value).upper() for key, value in group_colors.items()}
-                self._pending_color_group = str(colors.get("selected_color_group", "")).strip() or None
-                self._set_input_if_present("#input_group_hex", str(colors.get("group_hex_input", "#2563EB")))
+                    self.plot_style.group_colors = {
+                        str(key): str(value).upper() for key, value in group_colors.items()
+                    }
+                self._pending_color_group = (
+                    str(colors.get("selected_color_group", "")).strip() or None
+                )
+                self._set_input_if_present(
+                    "#input_group_hex", str(colors.get("group_hex_input", "#2563EB"))
+                )
 
             self.graph_specs = migrate_graph_specs(data.get("graph_specs", []))
             self._render_graph_specs()
@@ -952,11 +1073,17 @@ class TPAAnalyzerApp(App):
                 return
 
             files = sorted(
-                [path for path in directory.iterdir() if path.is_file() and path.suffix.lower() in SUPPORTED_DATA_EXTENSIONS],
+                [
+                    path
+                    for path in directory.iterdir()
+                    if path.is_file() and path.suffix.lower() in SUPPORTED_DATA_EXTENSIONS
+                ],
                 key=lambda item: item.name.lower(),
             )
             self.active_directory = directory
-            self.file_records = [{"filename": path.name, "path": str(path), "group": ""} for path in files]
+            self.file_records = [
+                {"filename": path.name, "path": str(path), "group": ""} for path in files
+            ]
             self.group_order = []
             self.selected_file_index = None
             self.selected_file_indices = set()
@@ -964,7 +1091,11 @@ class TPAAnalyzerApp(App):
             self._sync_group_order_from_records()
             self._render_file_list(selected_idx=selected_idx)
             self._update_color_group_select()
-            if self._widgets_ready() and self._pending_color_group and self._pending_color_group in self.group_order:
+            if (
+                self._widgets_ready()
+                and self._pending_color_group
+                and self._pending_color_group in self.group_order
+            ):
                 self.query_one("#select_color_group", Select).value = self._pending_color_group
                 self._sync_color_inputs_for_group(self._pending_color_group)
             self._pending_color_group = None
@@ -980,7 +1111,10 @@ class TPAAnalyzerApp(App):
                 self._set_status(f"No .csv/.tra files found in {directory}")
                 self._log(f"Directory refreshed: {directory} (no compatible files)")
         except Exception as exc:
-            self.logger.exception("Refresh failed", extra={"directory": str(self.active_directory or self.settings.default_data_dir)})
+            self.logger.exception(
+                "Refresh failed",
+                extra={"directory": str(self.active_directory or self.settings.default_data_dir)},
+            )
             self.active_directory = None
             self.file_records = []
             self.group_order = []
@@ -994,7 +1128,9 @@ class TPAAnalyzerApp(App):
 
     def _render_file_list(self, selected_idx: int | None = None) -> None:
         """Render the detected file table and selected-row state."""
-        self.selected_file_indices = {idx for idx in self.selected_file_indices if 0 <= idx < len(self.file_records)}
+        self.selected_file_indices = {
+            idx for idx in self.selected_file_indices if 0 <= idx < len(self.file_records)
+        }
         if not self.file_records:
             self.selected_file_index = None
             if not self._widgets_ready():
@@ -1007,7 +1143,9 @@ class TPAAnalyzerApp(App):
             self._update_assignment_buttons()
             return
 
-        target_idx = max(0, min(selected_idx if selected_idx is not None else 0, len(self.file_records) - 1))
+        target_idx = max(
+            0, min(selected_idx if selected_idx is not None else 0, len(self.file_records) - 1)
+        )
         if not self._widgets_ready():
             self.selected_file_index = target_idx
             return
@@ -1094,13 +1232,19 @@ class TPAAnalyzerApp(App):
             return
         if self.selected_group_order_index is None:
             self.selected_group_order_index = 0
-        self.selected_group_order_index = max(0, min(self.selected_group_order_index, len(self.group_order) - 1))
-        self._set_input_if_present("#input_group_name", self.group_order[self.selected_group_order_index])
+        self.selected_group_order_index = max(
+            0, min(self.selected_group_order_index, len(self.group_order) - 1)
+        )
+        self._set_input_if_present(
+            "#input_group_name", self.group_order[self.selected_group_order_index]
+        )
         if not self._widgets_ready():
             return
         list_widget = self.query_one("#group_order_list", OptionList)
         list_widget.clear_options()
-        list_widget.add_options([f"{idx + 1:02d}. {group}" for idx, group in enumerate(self.group_order)])
+        list_widget.add_options(
+            [f"{idx + 1:02d}. {group}" for idx, group in enumerate(self.group_order)]
+        )
         list_widget.highlighted = self.selected_group_order_index
         self._update_group_order_buttons()
         self._update_assignment_buttons()
@@ -1144,7 +1288,9 @@ class TPAAnalyzerApp(App):
             order_map = {group: idx for idx, group in enumerate(self.group_order)}
             reordered = summary.copy()
             reordered["_order"] = reordered[group_col].astype(str).map(order_map).fillna(10_000)
-            result["summary_df"] = reordered.sort_values("_order").drop(columns=["_order"]).reset_index(drop=True)
+            result["summary_df"] = (
+                reordered.sort_values("_order").drop(columns=["_order"]).reset_index(drop=True)
+            )
             result.setdefault("test_info", {})["group_order"] = self.group_order.copy()
 
     def _selected_group_name(self) -> str | None:
@@ -1252,7 +1398,13 @@ class TPAAnalyzerApp(App):
         """Rename an explicit group and update any assigned files."""
         current = old.strip()
         replacement = new.strip()
-        if not current or not replacement or current not in self.group_order or current == replacement or replacement in self.group_order:
+        if (
+            not current
+            or not replacement
+            or current not in self.group_order
+            or current == replacement
+            or replacement in self.group_order
+        ):
             return False
         idx = self.group_order.index(current)
         preserved_color = self.plot_style.group_colors.pop(current, None)
@@ -1320,6 +1472,7 @@ class TPAAnalyzerApp(App):
 
     def _collect_tpa_config(self) -> TPAConfig:
         """Collect the TPA configuration from UI fields."""
+
         def as_float(widget_id: str, default: float) -> float:
             """Parse a float input or return the provided default."""
             try:
@@ -1365,7 +1518,9 @@ class TPAAnalyzerApp(App):
             dpi = int(float(self.query_one("#input_dpi", Input).value.strip()))
         except ValueError:
             dpi = 300
-        return FigureConfig(ratio_preset=ratio, width_in=width, height_in=height, dpi=int(max(72, min(dpi, 1200))))
+        return FigureConfig(
+            ratio_preset=ratio, width_in=width, height_in=height, dpi=int(max(72, min(dpi, 1200)))
+        )
 
     def _update_figure_preview(self) -> None:
         """Refresh the figure preview summary."""
@@ -1373,7 +1528,9 @@ class TPAAnalyzerApp(App):
             return
         fig_cfg = self._collect_figure_config()
         width, height = fig_cfg.resolve_size(default=(10.0, 7.5))
-        self.query_one("#fig-preview", Static).update(f"Effective Size: {width:.2f} x {height:.2f} in @ {fig_cfg.dpi} DPI")
+        self.query_one("#fig-preview", Static).update(
+            f"Effective Size: {width:.2f} x {height:.2f} in @ {fig_cfg.dpi} DPI"
+        )
 
     def _custom_graph_analysis_ready(self) -> bool:
         """Return whether analysis-derived custom graph controls may be enabled."""
@@ -1387,7 +1544,11 @@ class TPAAnalyzerApp(App):
 
     def _selected_custom_left_axis_variables(self) -> list[str]:
         """Return checked left-axis variables in DOM order."""
-        return [str(checkbox.label) for checkbox in self._custom_left_axis_checkboxes() if checkbox.value]
+        return [
+            str(checkbox.label)
+            for checkbox in self._custom_left_axis_checkboxes()
+            if checkbox.value
+        ]
 
     def _set_custom_left_axis_selections(self, values: list[str]) -> None:
         """Set left-axis selections while preserving checkbox order."""
@@ -1395,7 +1556,9 @@ class TPAAnalyzerApp(App):
         for checkbox in self._custom_left_axis_checkboxes():
             checkbox.value = str(checkbox.label) in selected
 
-    def _set_custom_select_options(self, widget_id: str, options: list[tuple[str, str]], value: str, disabled: bool) -> None:
+    def _set_custom_select_options(
+        self, widget_id: str, options: list[tuple[str, str]], value: str, disabled: bool
+    ) -> None:
         """Replace select options while keeping a valid current value."""
         select = self.query_one(widget_id, Select)
         current_options = list(getattr(select, "_options", []))
@@ -1465,14 +1628,18 @@ class TPAAnalyzerApp(App):
         available = set(self._available_custom_graph_samples())
         return [sample for sample in self._custom_graph_selected_samples if sample in available]
 
-    def _mark_custom_graph_internal_update(self, widget_id: str | None, expected_value: str) -> None:
+    def _mark_custom_graph_internal_update(
+        self, widget_id: str | None, expected_value: str
+    ) -> None:
         """Suppress the next builder select event emitted by an internal widget refresh."""
         if not widget_id:
             return
         widget_id = widget_id.removeprefix("#")
         self._custom_graph_builder_internal_update_values[widget_id] = expected_value
 
-    def _consume_custom_graph_internal_update(self, widget_id: str | None, event_value: str) -> bool:
+    def _consume_custom_graph_internal_update(
+        self, widget_id: str | None, event_value: str
+    ) -> bool:
         """Return ``True`` when a builder event matches a pending internal refresh."""
         if not widget_id:
             return False
@@ -1483,7 +1650,9 @@ class TPAAnalyzerApp(App):
         self._custom_graph_builder_internal_update_values.pop(widget_id, None)
         return pending_value == event_value
 
-    def _should_skip_builder_internal_autosave(self, widget_id: str | None, event_value: str) -> bool:
+    def _should_skip_builder_internal_autosave(
+        self, widget_id: str | None, event_value: str
+    ) -> bool:
         """Return whether an autosave-triggering event came from a builder-owned refresh."""
         return self._consume_custom_graph_internal_update(widget_id, event_value)
 
@@ -1583,7 +1752,7 @@ class TPAAnalyzerApp(App):
 
             right_axis = self.query_one("#select_custom_right_axis", Select)
             current_right_axis = str(right_axis.value)
-            right_axis_options = [( "None", CUSTOM_GRAPH_NONE )]
+            right_axis_options = [("None", CUSTOM_GRAPH_NONE)]
             right_axis_options.extend(
                 (variable, variable)
                 for variable in eligible_right_axis_variables(
@@ -1614,7 +1783,9 @@ class TPAAnalyzerApp(App):
                 "#select_custom_segment",
                 segment_options,
                 current_segment,
-                disabled=(view_domain != "semantic_segment") or (not analysis_ready) or len(segment_options) == 1,
+                disabled=(view_domain != "semantic_segment")
+                or (not analysis_ready)
+                or len(segment_options) == 1,
             )
 
             segment_label = self.query_one("#label_custom_segment", Label)
@@ -1628,12 +1799,16 @@ class TPAAnalyzerApp(App):
             current_regression = str(regression_select.value)
             regression_options = [("None", CUSTOM_GRAPH_NONE)]
             if show_segment and active_segment != CUSTOM_GRAPH_NONE:
-                regression_options.append((f"{self._overlay_label(active_segment)} regression", active_segment))
+                regression_options.append(
+                    (f"{self._overlay_label(active_segment)} regression", active_segment)
+                )
             self._set_custom_select_options(
                 "#select_custom_regression",
                 regression_options,
                 current_regression,
-                disabled=(not show_segment) or active_segment == CUSTOM_GRAPH_NONE or len(regression_options) == 1,
+                disabled=(not show_segment)
+                or active_segment == CUSTOM_GRAPH_NONE
+                or len(regression_options) == 1,
             )
             regression_label.display = show_segment
             regression_select.display = show_segment
@@ -1655,7 +1830,9 @@ class TPAAnalyzerApp(App):
                 "#select_custom_annotation",
                 annotation_options,
                 current_annotation,
-                disabled=(not show_segment) or active_segment == CUSTOM_GRAPH_NONE or len(annotation_options) == 1,
+                disabled=(not show_segment)
+                or active_segment == CUSTOM_GRAPH_NONE
+                or len(annotation_options) == 1,
             )
 
             sample_label = self.query_one("#label_custom_sample_list", Label)
@@ -1678,15 +1855,32 @@ class TPAAnalyzerApp(App):
                 if selected_samples
                 else "0 selected"
             )
+            view_domain_label = (
+                "Semantic segment" if view_domain == "semantic_segment" else "Full curve"
+            )
+            curves_summary = ", ".join(selected_left) if selected_left else "None"
+            right_axis_summary = (
+                f" | Right axis: {right_axis_value}"
+                if right_axis_value != CUSTOM_GRAPH_NONE
+                else ""
+            )
+            regression_summary = (
+                self._overlay_label(regression_value)
+                if regression_value != CUSTOM_GRAPH_NONE
+                else "None"
+            )
+            right_axis_line = (
+                right_axis_value if right_axis_value != CUSTOM_GRAPH_NONE else "None"
+            )
+            band_mode_value = str(self.query_one("#select_band_mode", Select).value).upper()
             summary = (
-                f"View domain: {'Semantic segment' if view_domain == 'semantic_segment' else 'Full curve'}\n"
+                f"View domain: {view_domain_label}\n"
                 f"Segment: {self._overlay_label(active_segment)}\n"
-                f"Curves: {', '.join(selected_left) if selected_left else 'None'}"
-                f"{'' if right_axis_value == CUSTOM_GRAPH_NONE else f' | Right axis: {right_axis_value}'}\n"
-                f"Regression: {'None' if regression_value == CUSTOM_GRAPH_NONE else self._overlay_label(regression_value)}\n"
+                f"Curves: {curves_summary}{right_axis_summary}\n"
+                f"Regression: {regression_summary}\n"
                 f"Annotations: {self._annotation_label(annotation_value)}\n"
                 f"Samples: {sample_summary}\n"
-                f"Display mode: {str(display_mode.value)}"
+                f"Display mode: {display_mode.value!s}"
             )
             if view_domain == "semantic_segment" and active_segment == CUSTOM_GRAPH_NONE:
                 summary += "\nWarning: choose a segment before adding the graph."
@@ -1694,8 +1888,8 @@ class TPAAnalyzerApp(App):
                 summary += "\nWarning: no samples selected."
             summary += (
                 f"\nX domain: {x_domain}\n"
-                f"Right axis: {right_axis_value if right_axis_value != CUSTOM_GRAPH_NONE else 'None'}\n"
-                f"Band type: {str(self.query_one('#select_band_mode', Select).value).upper()}"
+                f"Right axis: {right_axis_line}\n"
+                f"Band type: {band_mode_value}"
             )
             self.query_one("#custom_graph_summary", Static).update(summary)
         finally:
@@ -1726,7 +1920,9 @@ class TPAAnalyzerApp(App):
                 else CustomGraphAxisLayer(variable=right_axis_value, role="right")
             ),
             view_domain=view_domain,
-            segment_key=None if view_domain == "full_curve" or segment_value == CUSTOM_GRAPH_NONE else segment_value,
+            segment_key=None
+            if view_domain == "full_curve" or segment_value == CUSTOM_GRAPH_NONE
+            else segment_value,
             rebase_x=view_domain == "semantic_segment",
             annotations=[]
             if annotation_value == CUSTOM_GRAPH_NONE
@@ -1754,7 +1950,10 @@ class TPAAnalyzerApp(App):
             graph_list.disabled = True
             self.selected_graph_spec_index = None
             return
-        labels = [self._graph_spec_label(spec, index) for index, spec in enumerate(self.graph_specs, start=1)]
+        labels = [
+            self._graph_spec_label(spec, index)
+            for index, spec in enumerate(self.graph_specs, start=1)
+        ]
         current_highlight = graph_list.highlighted
         graph_list.clear_options()
         graph_list.add_options(labels)
@@ -1804,7 +2003,9 @@ class TPAAnalyzerApp(App):
             self.selected_group_order_index = None
         elif 0 <= int(event.option_index) < len(self.group_order):
             self.selected_group_order_index = int(event.option_index)
-            self._set_input_if_present("#input_group_name", self.group_order[self.selected_group_order_index])
+            self._set_input_if_present(
+                "#input_group_name", self.group_order[self.selected_group_order_index]
+            )
         self._update_group_order_buttons()
         self._update_assignment_buttons()
 
@@ -1814,7 +2015,10 @@ class TPAAnalyzerApp(App):
         idx = self.selected_group_order_index
         if idx is None or idx <= 0 or idx >= len(self.group_order):
             return
-        self.group_order[idx - 1], self.group_order[idx] = self.group_order[idx], self.group_order[idx - 1]
+        self.group_order[idx - 1], self.group_order[idx] = (
+            self.group_order[idx],
+            self.group_order[idx - 1],
+        )
         self.selected_group_order_index = idx - 1
         self._render_group_order_list()
         self._update_color_group_select()
@@ -1833,7 +2037,10 @@ class TPAAnalyzerApp(App):
         idx = self.selected_group_order_index
         if idx is None or idx < 0 or idx >= len(self.group_order) - 1:
             return
-        self.group_order[idx + 1], self.group_order[idx] = self.group_order[idx], self.group_order[idx + 1]
+        self.group_order[idx + 1], self.group_order[idx] = (
+            self.group_order[idx],
+            self.group_order[idx + 1],
+        )
         self.selected_group_order_index = idx + 1
         self._render_group_order_list()
         self._update_color_group_select()
@@ -2171,11 +2378,15 @@ class TPAAnalyzerApp(App):
                 qc_summary = result.get("QC Summary")
                 if isinstance(qc_summary, dict):
                     qc_rows.append(qc_summary)
-                warnings.extend([f"{filename}: {warning}" for warning in result.get("Warnings", [])])
+                warnings.extend(
+                    [f"{filename}: {warning}" for warning in result.get("Warnings", [])]
+                )
             except (DataParseError, AnalysisError) as exc:
                 failures.append(f"{filename}: {exc}")
             except Exception as exc:
-                self.logger.exception("Unexpected analysis failure", extra={"filename": filename, "group": group})
+                self.logger.exception(
+                    "Unexpected analysis failure", extra={"filename": filename, "group": group}
+                )
                 failures.append(f"{filename}: {exc}")
 
         metrics_df = pd.DataFrame(metric_rows)
@@ -2190,11 +2401,26 @@ class TPAAnalyzerApp(App):
                 if metric_frame.empty:
                     continue
                 try:
-                    stats_results[metric] = run_statistics(metric_frame, group_col="Group", metric_col=metric, alpha=0.05, mode=stats_mode, group_order=group_order)
+                    stats_results[metric] = run_statistics(
+                        metric_frame,
+                        group_col="Group",
+                        metric_col=metric,
+                        alpha=0.05,
+                        mode=stats_mode,
+                        group_order=group_order,
+                    )
                 except Exception as exc:
                     warnings.append(f"Stats failed for {metric}: {exc}")
 
-        self.call_from_thread(self._apply_analysis_results, metrics_df, trace_df, qc_df, stats_results, warnings, failures)
+        self.call_from_thread(
+            self._apply_analysis_results,
+            metrics_df,
+            trace_df,
+            qc_df,
+            stats_results,
+            warnings,
+            failures,
+        )
         self.call_from_thread(self._set_buttons_disabled, False)
 
     def _apply_analysis_results(
@@ -2223,7 +2449,12 @@ class TPAAnalyzerApp(App):
             for warning in warnings[:12]:
                 self._log(f"- {warning}")
         self._sync_custom_graph_builder_state()
-        self._set_status(f"Analysis done. Valid files: {len(metrics_df)} | Stats metrics: {len(stats_results)} | Failures: {len(failures)}")
+        self._set_status(
+            "Analysis done. "
+            f"Valid files: {len(metrics_df)} | "
+            f"Stats metrics: {len(stats_results)} | "
+            f"Failures: {len(failures)}"
+        )
         self._log("Analysis completed.")
         self._autosave_session()
 
@@ -2233,7 +2464,9 @@ class TPAAnalyzerApp(App):
         if self.metrics_df.empty:
             self._set_status("No analysis results to export.")
             return
-        self.export_tables_worker(self.metrics_df.copy(), self.qc_df.copy(), self.stats_results.copy())
+        self.export_tables_worker(
+            self.metrics_df.copy(), self.qc_df.copy(), self.stats_results.copy()
+        )
 
     @work(thread=True, exclusive=True)
     def export_tables_worker(
@@ -2274,12 +2507,14 @@ class TPAAnalyzerApp(App):
         if self.trace_df.empty:
             self._set_status("No trace data to plot. Run analysis first.")
             return
-        trace_df, metrics_df, qc_df, stats_results, group_order = filter_assigned_plot_export_payload(
-            trace_df=self.trace_df.copy(),
-            metrics_df=self.metrics_df.copy(),
-            qc_df=self.qc_df.copy(),
-            stats_results=self.stats_results.copy(),
-            group_order=self.group_order.copy(),
+        trace_df, metrics_df, qc_df, stats_results, group_order = (
+            filter_assigned_plot_export_payload(
+                trace_df=self.trace_df.copy(),
+                metrics_df=self.metrics_df.copy(),
+                qc_df=self.qc_df.copy(),
+                stats_results=self.stats_results.copy(),
+                group_order=self.group_order.copy(),
+            )
         )
         self.export_plots_worker(
             trace_df=trace_df,
@@ -2343,12 +2578,14 @@ class TPAAnalyzerApp(App):
         if self.metrics_df.empty:
             self._set_status("No analysis results. Run analysis first.")
             return
-        trace_df, metrics_df, qc_df, stats_results, group_order = filter_assigned_plot_export_payload(
-            trace_df=self.trace_df.copy(),
-            metrics_df=self.metrics_df.copy(),
-            qc_df=self.qc_df.copy(),
-            stats_results=self.stats_results.copy(),
-            group_order=self.group_order.copy(),
+        trace_df, metrics_df, qc_df, stats_results, group_order = (
+            filter_assigned_plot_export_payload(
+                trace_df=self.trace_df.copy(),
+                metrics_df=self.metrics_df.copy(),
+                qc_df=self.qc_df.copy(),
+                stats_results=self.stats_results.copy(),
+                group_order=self.group_order.copy(),
+            )
         )
         self.export_all_worker(
             metrics_df=metrics_df,

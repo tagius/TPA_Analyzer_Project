@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Final
 
-
 SESSION_FILE_NAME: Final[str] = ".tpa_analyzer_session.json"
 SESSION_SCHEMA_VERSION: Final[int] = 2
 

@@ -2,11 +2,12 @@ import asyncio
 from pathlib import Path
 
 import pandas as pd
+from textual.widgets import Button, DataTable, Input, OptionList, Static
+
 from tpa_analyzer.config.settings import AppSettings
 from tpa_analyzer.core.constants import COMPUTED_METRICS
 from tpa_analyzer.core.session import save_session_data, session_path
 from tpa_analyzer.ui.app import TPAAnalyzerApp
-from textual.widgets import Button, DataTable, Input, OptionList, Static
 
 
 def _make_app(tmp_path: Path) -> TPAAnalyzerApp:
@@ -63,7 +64,9 @@ def test_group_rename_invalidates_existing_analysis_results(tmp_path: Path) -> N
         app = _make_app(tmp_path)
 
         async with app.run_test() as pilot:
-            app.file_records = [{"filename": "a.csv", "path": str(tmp_path / "a.csv"), "group": "Control"}]
+            app.file_records = [
+                {"filename": "a.csv", "path": str(tmp_path / "a.csv"), "group": "Control"}
+            ]
             app.group_order = ["Control"]
             app.selected_group_order_index = 0
             app._render_file_list(selected_idx=0)
@@ -166,7 +169,9 @@ def test_space_action_toggles_highlighted_file_selection(tmp_path: Path) -> None
 
             assert app.selected_file_index == 1
             assert app.selected_file_indices == {1}
-            assert str(app.query_one("#selected_file_count", Static).render()) == "Selected files: 1"
+            assert (
+                str(app.query_one("#selected_file_count", Static).render()) == "Selected files: 1"
+            )
 
     asyncio.run(scenario())
 
@@ -223,7 +228,9 @@ def test_collect_session_payload_persists_active_group(tmp_path: Path) -> None:
 def test_load_session_for_directory_ignores_missing_active_group(tmp_path: Path) -> None:
     (tmp_path / "sample_a.csv").write_text("x", encoding="utf-8")
     app = _make_app(tmp_path)
-    app.file_records = [{"filename": "sample_a.csv", "path": str(tmp_path / "sample_a.csv"), "group": ""}]
+    app.file_records = [
+        {"filename": "sample_a.csv", "path": str(tmp_path / "sample_a.csv"), "group": ""}
+    ]
     app.group_order = ["Legacy"]
     app.selected_group_order_index = 0
 
@@ -247,7 +254,9 @@ def test_load_session_for_directory_ignores_missing_active_group(tmp_path: Path)
 def test_load_session_for_directory_restores_existing_active_group(tmp_path: Path) -> None:
     (tmp_path / "sample_a.csv").write_text("x", encoding="utf-8")
     app = _make_app(tmp_path)
-    app.file_records = [{"filename": "sample_a.csv", "path": str(tmp_path / "sample_a.csv"), "group": ""}]
+    app.file_records = [
+        {"filename": "sample_a.csv", "path": str(tmp_path / "sample_a.csv"), "group": ""}
+    ]
 
     save_session_data(
         session_path(tmp_path),
@@ -270,7 +279,9 @@ def test_load_session_for_directory_restores_existing_active_group(tmp_path: Pat
 def test_load_session_for_directory_applies_saved_empty_group(tmp_path: Path) -> None:
     (tmp_path / "sample_a.csv").write_text("x", encoding="utf-8")
     app = _make_app(tmp_path)
-    app.file_records = [{"filename": "sample_a.csv", "path": str(tmp_path / "sample_a.csv"), "group": "Legacy"}]
+    app.file_records = [
+        {"filename": "sample_a.csv", "path": str(tmp_path / "sample_a.csv"), "group": "Legacy"}
+    ]
 
     save_session_data(
         session_path(tmp_path),
@@ -288,7 +299,9 @@ def test_load_session_for_directory_applies_saved_empty_group(tmp_path: Path) ->
     assert app.file_records[0]["group"] == ""
 
 
-def test_load_session_for_directory_derives_group_order_from_saved_records_when_missing(tmp_path: Path) -> None:
+def test_load_session_for_directory_derives_group_order_from_saved_records_when_missing(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "sample_a.csv").write_text("x", encoding="utf-8")
     (tmp_path / "sample_b.csv").write_text("x", encoding="utf-8")
     (tmp_path / "sample_c.csv").write_text("x", encoding="utf-8")
@@ -319,7 +332,9 @@ def test_load_session_for_directory_derives_group_order_from_saved_records_when_
     assert [record["group"] for record in app.file_records] == ["Beta", "Alpha", "Beta"]
 
 
-def test_load_session_for_directory_clears_groups_missing_from_restored_order(tmp_path: Path) -> None:
+def test_load_session_for_directory_clears_groups_missing_from_restored_order(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "sample_a.csv").write_text("x", encoding="utf-8")
     (tmp_path / "sample_b.csv").write_text("x", encoding="utf-8")
     app = _make_app(tmp_path)

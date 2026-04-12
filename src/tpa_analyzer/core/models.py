@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import re
+from dataclasses import dataclass, field
 from typing import Literal
 
 import matplotlib
-
 
 PlotSource = Literal["trace", "metric"]
 AxisKind = Literal["x", "y"]

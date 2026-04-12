@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -31,7 +31,7 @@ class AppSettings:
     debug_enabled: bool = False
 
     @classmethod
-    def from_env(cls) -> "AppSettings":
+    def from_env(cls) -> AppSettings:
         """Build application settings from environment variables."""
         default_dir = Path(os.getenv("TPA_ANALYZER_DEFAULT_DATA_DIR", ".")).expanduser()
         return cls(

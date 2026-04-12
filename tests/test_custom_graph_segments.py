@@ -1,12 +1,25 @@
 from pathlib import Path
 
-import pytest
 import pandas as pd
+import pytest
 
 from tpa_analyzer.core.errors import PlotSpecError
-from tpa_analyzer.core.models import CustomGraphAnnotation, CustomGraphAxisLayer, CustomGraphSpec, PlotStyleConfig
-from tpa_analyzer.plotting.custom_graphs import eligible_annotation_keys, eligible_overlay_keys, semantic_segment_keys
-from tpa_analyzer.plotting.engine import _slice_trace_to_segment, expand_composed_graph_spec, plot_custom_graphs
+from tpa_analyzer.core.models import (
+    CustomGraphAnnotation,
+    CustomGraphAxisLayer,
+    CustomGraphSpec,
+    PlotStyleConfig,
+)
+from tpa_analyzer.plotting.custom_graphs import (
+    eligible_annotation_keys,
+    eligible_overlay_keys,
+    semantic_segment_keys,
+)
+from tpa_analyzer.plotting.engine import (
+    _slice_trace_to_segment,
+    expand_composed_graph_spec,
+    plot_custom_graphs,
+)
 
 
 def test_segment_registry_lists_all_supported_semantic_segments() -> None:
@@ -106,12 +119,48 @@ def test_semantic_annotation_must_match_selected_segment() -> None:
 def test_segment_render_warns_when_some_files_lack_qc_markers(tmp_path) -> None:
     trace_df = pd.DataFrame(
         [
-            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 0.2, "Force Corrected (N)": 0.5},
-            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 0.5, "Force Corrected (N)": 1.2},
-            {"File": "a.csv", "Filename": "a.csv", "Group": "Control", "Time (s)": 0.7, "Force Corrected (N)": 1.5},
-            {"File": "b.csv", "Filename": "b.csv", "Group": "Control", "Time (s)": 0.2, "Force Corrected (N)": 0.6},
-            {"File": "b.csv", "Filename": "b.csv", "Group": "Control", "Time (s)": 0.5, "Force Corrected (N)": 1.1},
-            {"File": "b.csv", "Filename": "b.csv", "Group": "Control", "Time (s)": 0.7, "Force Corrected (N)": 1.4},
+            {
+                "File": "a.csv",
+                "Filename": "a.csv",
+                "Group": "Control",
+                "Time (s)": 0.2,
+                "Force Corrected (N)": 0.5,
+            },
+            {
+                "File": "a.csv",
+                "Filename": "a.csv",
+                "Group": "Control",
+                "Time (s)": 0.5,
+                "Force Corrected (N)": 1.2,
+            },
+            {
+                "File": "a.csv",
+                "Filename": "a.csv",
+                "Group": "Control",
+                "Time (s)": 0.7,
+                "Force Corrected (N)": 1.5,
+            },
+            {
+                "File": "b.csv",
+                "Filename": "b.csv",
+                "Group": "Control",
+                "Time (s)": 0.2,
+                "Force Corrected (N)": 0.6,
+            },
+            {
+                "File": "b.csv",
+                "Filename": "b.csv",
+                "Group": "Control",
+                "Time (s)": 0.5,
+                "Force Corrected (N)": 1.1,
+            },
+            {
+                "File": "b.csv",
+                "Filename": "b.csv",
+                "Group": "Control",
+                "Time (s)": 0.7,
+                "Force Corrected (N)": 1.4,
+            },
         ]
     )
     qc_df = pd.DataFrame([{"Filename": "a.csv", "Bite1 Start Index": 1, "Peak1 Index": 2}])

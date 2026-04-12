@@ -7,7 +7,6 @@ from typing import Final
 from tpa_analyzer.core.constants import COMPUTED_METRICS
 from tpa_analyzer.core.models import PlotVariable
 
-
 VARIABLE_REGISTRY: Final[dict[str, PlotVariable]] = {
     "Time (s)": PlotVariable(
         label="Time (s)",
@@ -114,7 +113,10 @@ def options_for(kind: str, source: str | None = None) -> list[str]:
     values = [
         label
         for label, meta in VARIABLE_REGISTRY.items()
-        if (meta.kind == kind or (kind == "x" and meta.source == "metric" and meta.scale == "numeric"))
+        if (
+            meta.kind == kind
+            or (kind == "x" and meta.source == "metric" and meta.scale == "numeric")
+        )
         and (source is None or meta.source == source)
     ]
     return sorted(values, key=str.lower)

@@ -77,7 +77,9 @@ def _choose_parametric(grouped: dict[str, np.ndarray], alpha: float, mode: str) 
                     reason=f"Shapiro failed for group '{group_name}' (p={p_value:.4g})",
                 )
 
-    groups_for_levene = [vals[np.isfinite(vals)] for vals in grouped.values() if len(vals[np.isfinite(vals)]) >= 2]
+    groups_for_levene = [
+        vals[np.isfinite(vals)] for vals in grouped.values() if len(vals[np.isfinite(vals)]) >= 2
+    ]
     if len(groups_for_levene) >= 2:
         try:
             levene_p = stats.levene(*groups_for_levene).pvalue
@@ -91,7 +93,9 @@ def _choose_parametric(grouped: dict[str, np.ndarray], alpha: float, mode: str) 
     return StatsDecision(parametric=False, reason="Assumptions did not pass")
 
 
-def _build_letters(group_order: list[str], significant_pairs: set[tuple[str, str]]) -> dict[str, str]:
+def _build_letters(
+    group_order: list[str], significant_pairs: set[tuple[str, str]]
+) -> dict[str, str]:
     """Build compact-letter significance labels from pairwise test results."""
     letter_sets: list[set[str]] = []
     letters_by_group: dict[str, list[str]] = {group: [] for group in group_order}
@@ -162,8 +166,7 @@ def run_statistics(
         raise ValueError(f"No valid values available for metric '{metric_col}'.")
 
     grouped_series = {
-        group: values.to_numpy(dtype=float)
-        for group, values in work.groupby(group_col)[metric_col]
+        group: values.to_numpy(dtype=float) for group, values in work.groupby(group_col)[metric_col]
     }
 
     if group_order:
@@ -292,8 +295,14 @@ def run_statistics(
         letters_map = _build_letters(group_order_resolved, significant_pairs)
 
     summary_df["Significance"] = summary_df[group_col].map(letters_map).fillna("a")
-    summary_df["_order"] = summary_df[group_col].map({group: idx for idx, group in enumerate(group_order_resolved)})
-    summary_df = summary_df.sort_values("_order", ascending=True).drop(columns=["_order"]).reset_index(drop=True)
+    summary_df["_order"] = summary_df[group_col].map(
+        {group: idx for idx, group in enumerate(group_order_resolved)}
+    )
+    summary_df = (
+        summary_df.sort_values("_order", ascending=True)
+        .drop(columns=["_order"])
+        .reset_index(drop=True)
+    )
     pairwise_df = pd.DataFrame(pairwise_rows)
 
     return {

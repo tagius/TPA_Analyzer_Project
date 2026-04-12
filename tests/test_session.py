@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from tpa_analyzer.core import session as session_module
+from tpa_analyzer.core.errors import SessionError
 from tpa_analyzer.core.models import (
     CustomGraphAnnotation,
     CustomGraphAxisLayer,
@@ -13,8 +15,6 @@ from tpa_analyzer.core.models import (
     CustomGraphSpec,
     GraphSpec,
 )
-from tpa_analyzer.core.errors import SessionError
-from tpa_analyzer.core import session as session_module
 from tpa_analyzer.core.session import load_session_data, migrate_graph_specs, save_session_data
 
 
@@ -45,7 +45,11 @@ def test_migrate_graph_specs_preserves_composed_payload() -> None:
                 "title": "Composed",
                 "x_domain": "Time (s)",
                 "left_axis": [{"variable": "Force (N)", "role": "left", "curve_mode": "mean_band"}],
-                "right_axis": {"variable": "Deformation (mm)", "role": "right", "curve_mode": "individual"},
+                "right_axis": {
+                    "variable": "Deformation (mm)",
+                    "role": "right",
+                    "curve_mode": "individual",
+                },
                 "overlay": {"kind": "segment", "key": "markers"},
                 "band_mode": "ci95",
             }
@@ -53,8 +57,12 @@ def test_migrate_graph_specs_preserves_composed_payload() -> None:
     )
     assert len(specs) == 1
     assert isinstance(specs[0], CustomGraphSpec)
-    assert specs[0].left_axis[0] == CustomGraphAxisLayer(variable="Force (N)", role="left", curve_mode="mean_band")
-    assert specs[0].right_axis == CustomGraphAxisLayer(variable="Deformation (mm)", role="right", curve_mode="individual")
+    assert specs[0].left_axis[0] == CustomGraphAxisLayer(
+        variable="Force (N)", role="left", curve_mode="mean_band"
+    )
+    assert specs[0].right_axis == CustomGraphAxisLayer(
+        variable="Deformation (mm)", role="right", curve_mode="individual"
+    )
     assert specs[0].view_domain == "semantic_segment"
     assert specs[0].segment_key == "markers"
     assert specs[0].rebase_x is True
@@ -206,6 +214,7 @@ def test_migrate_graph_specs_rejects_malformed_selected_samples_payload() -> Non
 
 def test_migrate_graph_specs_propagates_unexpected_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     """Unexpected migration failures should not be swallowed."""
+
     def boom(_: object) -> GraphSpec:
         raise RuntimeError("boom")
 
@@ -224,7 +233,11 @@ def test_migrate_graph_specs_raises_on_invalid_dict_payload() -> None:
 def test_save_and_load_session_data_roundtrip(tmp_path: Path) -> None:
     """Saved session payloads should round-trip through JSON persistence."""
     path = tmp_path / ".tpa_analyzer_session.json"
-    payload = {"graph_specs": [GraphSpec(title="Graph", plot_type="trace", x_cols=["Time (s)"], y_cols=["Force (N)"])]}
+    payload = {
+        "graph_specs": [
+            GraphSpec(title="Graph", plot_type="trace", x_cols=["Time (s)"], y_cols=["Force (N)"])
+        ]
+    }
     save_session_data(path, payload)
     loaded = load_session_data(path)
     assert loaded["schema_version"] >= 1
@@ -248,8 +261,12 @@ def test_save_session_data_serializes_composed_graph_specs_cleanly(tmp_path: Pat
             CustomGraphSpec(
                 title="Composed",
                 x_domain="Time (s)",
-                left_axis=[CustomGraphAxisLayer(variable="Force (N)", role="left", curve_mode="mean_band")],
-                right_axis=CustomGraphAxisLayer(variable="Deformation (mm)", role="right", curve_mode="individual"),
+                left_axis=[
+                    CustomGraphAxisLayer(variable="Force (N)", role="left", curve_mode="mean_band")
+                ],
+                right_axis=CustomGraphAxisLayer(
+                    variable="Deformation (mm)", role="right", curve_mode="individual"
+                ),
                 overlay=CustomGraphOverlay(kind="segment", key="markers"),
                 band_mode="ci95",
             )

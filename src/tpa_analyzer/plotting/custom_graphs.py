@@ -143,7 +143,9 @@ def _legacy_overlay_item(segment: SemanticSegment) -> CompatiblePlotItem:
         item_type=item_type,
         allowed_x_domains=segment.allowed_x_domains,
         requires_analysis=True,
-        requires_left_variables=("True Stress (kPa)",) if segment.key == "modulus_window" else ("Force Corrected (N)",),
+        requires_left_variables=("True Stress (kPa)",)
+        if segment.key == "modulus_window"
+        else ("Force Corrected (N)",),
     )
 
 
@@ -188,10 +190,14 @@ def eligible_segment_keys(x_domain: str, analysis_ready: bool) -> list[str]:
     """Return semantic segments that can be selected for the current graph state."""
     if not analysis_ready:
         return []
-    return [key for key, segment in SEMANTIC_SEGMENTS.items() if x_domain in segment.allowed_x_domains]
+    return [
+        key for key, segment in SEMANTIC_SEGMENTS.items() if x_domain in segment.allowed_x_domains
+    ]
 
 
-def eligible_annotation_keys(segment_key: str, left_variables: list[str] | None = None) -> list[str]:
+def eligible_annotation_keys(
+    segment_key: str, left_variables: list[str] | None = None
+) -> list[str]:
     """Return annotations compatible with one semantic segment."""
     if segment_key not in SEMANTIC_SEGMENTS:
         return []
@@ -225,14 +231,24 @@ def eligible_left_axis_variables(x_domain: str, analysis_ready: bool) -> list[st
     return eligible
 
 
-def eligible_right_axis_variables(x_domain: str, left_variables: list[str], analysis_ready: bool) -> list[str]:
+def eligible_right_axis_variables(
+    x_domain: str, left_variables: list[str], analysis_ready: bool
+) -> list[str]:
     """Return right-axis trace variables compatible with the current left-axis selection."""
-    left_axis_candidates = eligible_left_axis_variables(x_domain=x_domain, analysis_ready=analysis_ready)
-    selected_left_variables = {str(variable).strip() for variable in left_variables if str(variable).strip()}
-    return [variable for variable in left_axis_candidates if variable not in selected_left_variables]
+    left_axis_candidates = eligible_left_axis_variables(
+        x_domain=x_domain, analysis_ready=analysis_ready
+    )
+    selected_left_variables = {
+        str(variable).strip() for variable in left_variables if str(variable).strip()
+    }
+    return [
+        variable for variable in left_axis_candidates if variable not in selected_left_variables
+    ]
 
 
-def eligible_overlay_keys(x_domain: str, left_variables: list[str], analysis_ready: bool) -> list[str]:
+def eligible_overlay_keys(
+    x_domain: str, left_variables: list[str], analysis_ready: bool
+) -> list[str]:
     """Return overlay keys that match the current graph composition."""
     return _eligible_items(
         OVERLAY_COMPATIBILITY,
@@ -249,14 +265,18 @@ def _eligible_items(
     analysis_ready: bool,
 ) -> list[str]:
     """Return keys whose compatibility metadata matches the current graph state."""
-    selected_left_variables = {str(variable).strip() for variable in left_variables if str(variable).strip()}
+    selected_left_variables = {
+        str(variable).strip() for variable in left_variables if str(variable).strip()
+    }
     eligible: list[str] = []
     for key, item in items.items():
         if x_domain not in item.allowed_x_domains:
             continue
         if item.requires_analysis and not analysis_ready:
             continue
-        if item.requires_left_variables and not set(item.requires_left_variables).issubset(selected_left_variables):
+        if item.requires_left_variables and not set(item.requires_left_variables).issubset(
+            selected_left_variables
+        ):
             continue
         eligible.append(key)
     return eligible

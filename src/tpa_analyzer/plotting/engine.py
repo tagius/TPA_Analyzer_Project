@@ -18,15 +18,19 @@ import pandas as pd
 from tpa_analyzer.core.constants import COMPUTED_METRICS
 from tpa_analyzer.core.errors import PlotSpecError
 from tpa_analyzer.core.models import (
-    CustomGraphAxisLayer,
     CustomGraphAnnotation,
+    CustomGraphAxisLayer,
     CustomGraphOverlay,
     CustomGraphSpec,
     FigureConfig,
     GraphSpec,
     PlotStyleConfig,
 )
-from tpa_analyzer.plotting.custom_graphs import ANNOTATION_COMPATIBILITY, OVERLAY_COMPATIBILITY, SEMANTIC_SEGMENTS
+from tpa_analyzer.plotting.custom_graphs import (
+    ANNOTATION_COMPATIBILITY,
+    OVERLAY_COMPATIBILITY,
+    SEMANTIC_SEGMENTS,
+)
 from tpa_analyzer.plotting.registry import VARIABLE_REGISTRY, axis_label, registry_entry
 
 LEFT_AXIS_ACCENT = "#9A3412"
@@ -165,13 +169,17 @@ def normalize_composed_graph_spec(spec: CustomGraphSpec | dict[str, Any]) -> Cus
             title=str(spec.get("title", "Custom Graph")),
             x_domain=str(spec.get("x_domain", "")).strip(),
             left_axis=[_normalize_axis_layer(item, default_role="left") for item in raw_left_axis],
-            right_axis=_normalize_axis_layer(raw_right_axis, default_role="right") if raw_right_axis is not None else None,
+            right_axis=_normalize_axis_layer(raw_right_axis, default_role="right")
+            if raw_right_axis is not None
+            else None,
             view_domain=str(spec.get("view_domain", "full_curve")).strip() or "full_curve",
             segment_key=normalized_segment_key,
             rebase_x=bool(spec.get("rebase_x", False)),
             annotations=[_normalize_annotation(item) for item in raw_annotations],
             data_scope=str(spec.get("data_scope", "grouped")).strip() or "grouped",
-            selected_samples=[str(item).strip() for item in raw_selected_samples if str(item).strip()],
+            selected_samples=[
+                str(item).strip() for item in raw_selected_samples if str(item).strip()
+            ],
             display_mode=str(spec.get("display_mode", "stacked")).strip() or "stacked",
             overlay=_normalize_overlay(raw_overlay) if raw_overlay is not None else None,
             enabled=bool(spec.get("enabled", True)),
@@ -235,10 +243,15 @@ def validate_composed_graph_spec(spec: CustomGraphSpec) -> None:
         if segment is None:
             raise PlotSpecError(f"Unknown semantic segment: {spec.segment_key}")
         if not segment.allowed_x_domains or spec.x_domain not in segment.allowed_x_domains:
-            raise PlotSpecError(f"Semantic segment '{spec.segment_key}' does not support x-domain '{spec.x_domain}'.")
+            raise PlotSpecError(
+                "Semantic segment "
+                f"'{spec.segment_key}' does not support x-domain '{spec.x_domain}'."
+            )
         if not _segment_is_index_based(spec.segment_key):
             raise PlotSpecError(
-                f"Semantic segment '{spec.segment_key}' uses value-based QC markers and is not supported by the shared slice/rebase path."
+                "Semantic segment "
+                f"'{spec.segment_key}' uses value-based QC markers "
+                "and is not supported by the shared slice/rebase path."
             )
         if not spec.rebase_x:
             raise PlotSpecError("Semantic segment graphs must rebase the X axis.")
@@ -250,12 +263,19 @@ def validate_composed_graph_spec(spec: CustomGraphSpec) -> None:
                 raise PlotSpecError(f"Unknown annotation: {annotation.key}")
             if spec.segment_key not in annotation_meta.allowed_segments:
                 raise PlotSpecError(
-                    f"Annotation '{annotation.key}' is not compatible with semantic segment '{spec.segment_key}'."
+                    "Annotation "
+                    f"'{annotation.key}' is not compatible with "
+                    f"semantic segment '{spec.segment_key}'."
                 )
-            missing_left = [variable for variable in annotation_meta.required_left_variables if variable not in left_variables]
+            missing_left = [
+                variable
+                for variable in annotation_meta.required_left_variables
+                if variable not in left_variables
+            ]
             if missing_left:
                 raise PlotSpecError(
-                    f"Annotation '{annotation.key}' requires left-axis variables: {', '.join(missing_left)}"
+                    f"Annotation '{annotation.key}' requires left-axis variables: "
+                    f"{', '.join(missing_left)}"
                 )
 
     for layer in [*spec.left_axis, *([spec.right_axis] if spec.right_axis is not None else [])]:
@@ -287,9 +307,15 @@ def validate_composed_graph_spec(spec: CustomGraphSpec) -> None:
         if overlay_meta.item_type != overlay.kind:
             raise PlotSpecError(f"Overlay '{overlay.key}' does not match kind '{overlay.kind}'.")
         if spec.x_domain not in overlay_meta.allowed_x_domains:
-            raise PlotSpecError(f"Overlay '{overlay.key}' does not support x-domain '{spec.x_domain}'.")
+            raise PlotSpecError(
+                f"Overlay '{overlay.key}' does not support x-domain '{spec.x_domain}'."
+            )
 
-        missing_left = [variable for variable in overlay_meta.requires_left_variables if variable not in left_variables]
+        missing_left = [
+            variable
+            for variable in overlay_meta.requires_left_variables
+            if variable not in left_variables
+        ]
         if missing_left:
             raise PlotSpecError(
                 f"Overlay '{overlay.key}' requires left-axis variables: {', '.join(missing_left)}"
@@ -406,7 +432,9 @@ def validate_graph_spec(spec: GraphSpec) -> None:
             raise PlotSpecError(f"Unknown X variable: {x_label}")
         x_meta = registry_entry(x_label)
         if x_meta.source != allowed_source:
-            raise PlotSpecError(f"X variable '{x_label}' does not belong to {allowed_source} plots.")
+            raise PlotSpecError(
+                f"X variable '{x_label}' does not belong to {allowed_source} plots."
+            )
         if x_meta.kind != "x" and not (allowed_source == "metric" and x_meta.scale == "numeric"):
             raise PlotSpecError(f"X variable '{x_label}' is not selectable on the x-axis.")
 
@@ -415,7 +443,9 @@ def validate_graph_spec(spec: GraphSpec) -> None:
             raise PlotSpecError(f"Unknown Y variable: {y_label}")
         y_meta = registry_entry(y_label)
         if y_meta.source != allowed_source:
-            raise PlotSpecError(f"Y variable '{y_label}' does not belong to {allowed_source} plots.")
+            raise PlotSpecError(
+                f"Y variable '{y_label}' does not belong to {allowed_source} plots."
+            )
         if y_meta.kind != "y":
             raise PlotSpecError(f"Y variable '{y_label}' is not selectable on the y-axis.")
 
@@ -574,10 +604,20 @@ def build_mean_band(
         interpolated = [np.interp(grid, x_vals, y_vals) for x_vals, y_vals in replicate_curves]
         stack = np.vstack(interpolated)
         mean_vals = np.nanmean(stack, axis=0)
-        sd_vals = np.nanstd(stack, axis=0, ddof=1) if stack.shape[0] > 1 else np.zeros_like(mean_vals)
-        spread = 1.96 * sd_vals / np.sqrt(stack.shape[0]) if band_mode.lower() == "ci95" else sd_vals
+        sd_vals = (
+            np.nanstd(stack, axis=0, ddof=1) if stack.shape[0] > 1 else np.zeros_like(mean_vals)
+        )
+        spread = (
+            1.96 * sd_vals / np.sqrt(stack.shape[0]) if band_mode.lower() == "ci95" else sd_vals
+        )
 
-        for x_val, mean_val, lower_val, upper_val in zip(grid, mean_vals, mean_vals - spread, mean_vals + spread):
+        for x_val, mean_val, lower_val, upper_val in zip(
+            grid,
+            mean_vals,
+            mean_vals - spread,
+            mean_vals + spread,
+            strict=True,
+        ):
             rows.append(
                 {
                     group_col: group_name,
@@ -644,7 +684,9 @@ def _apply_curve_mode(
     if mode in {"individual", "both"}:
         _plot_individual(ax, trace_df, x_col, y_col, style, group_order=group_order)
     if mode in {"mean_band", "both"}:
-        _plot_mean_band(ax, trace_df, x_col, y_col, style, band_mode=band_mode, group_order=group_order)
+        _plot_mean_band(
+            ax, trace_df, x_col, y_col, style, band_mode=band_mode, group_order=group_order
+        )
 
 
 def _ordered_legend(
@@ -656,7 +698,7 @@ def _ordered_legend(
     dedup_handles: list[Any] = []
     dedup_labels: list[str] = []
     seen: set[str] = set()
-    for handle, label in zip(handles, labels):
+    for handle, label in zip(handles, labels, strict=True):
         label_clean = str(label).strip()
         if not label_clean or label_clean in seen:
             continue
@@ -670,16 +712,18 @@ def _ordered_legend(
 
     order_map = {group: index for index, group in enumerate(requested_order)}
     ordered_items = sorted(
-        list(zip(dedup_handles, dedup_labels)),
+        list(zip(dedup_handles, dedup_labels, strict=True)),
         key=lambda item: (order_map.get(item[1], 10_000), dedup_labels.index(item[1])),
     )
     if not ordered_items:
         return dedup_handles, dedup_labels
-    ordered_handles, ordered_labels = zip(*ordered_items)
+    ordered_handles, ordered_labels = zip(*ordered_items, strict=True)
     return list(ordered_handles), list(ordered_labels)
 
 
-def _apply_axis_legend(ax: Any, group_order: list[str] | None = None, extra_axes: list[Any] | None = None) -> None:
+def _apply_axis_legend(
+    ax: Any, group_order: list[str] | None = None, extra_axes: list[Any] | None = None
+) -> None:
     """Apply a deduplicated legend to one axis, optionally merging labels from sibling axes."""
     handles, labels = ax.get_legend_handles_labels()
     for extra_ax in extra_axes or []:
@@ -744,9 +788,18 @@ def _plot_metric_group_axis(
                     for _, row in summary_df.iterrows()
                     if "Group" in row.index
                 }
-                ymax = float(np.nanmax(summary["Mean"].to_numpy(dtype=float) + summary["SD"].to_numpy(dtype=float))) if len(summary) else 1.0
+                ymax = (
+                    float(
+                        np.nanmax(
+                            summary["Mean"].to_numpy(dtype=float)
+                            + summary["SD"].to_numpy(dtype=float)
+                        )
+                    )
+                    if len(summary)
+                    else 1.0
+                )
                 offset = max(ymax * 0.04, 0.02)
-                for bar, group in zip(bars, unique_groups):
+                for bar, group in zip(bars, unique_groups, strict=True):
                     ax.text(
                         bar.get_x() + bar.get_width() / 2,
                         bar.get_height() + summary.loc[group, "SD"] + offset,
@@ -760,7 +813,11 @@ def _plot_metric_group_axis(
     if metric_view in {"raw", "both"}:
         for group, group_frame in frame.groupby("Group", sort=False):
             positions = np.full(len(group_frame), x_positions[str(group)], dtype=float)
-            jitter = np.linspace(-0.12, 0.12, len(group_frame)) if len(group_frame) > 1 else np.array([0.0])
+            jitter = (
+                np.linspace(-0.12, 0.12, len(group_frame))
+                if len(group_frame) > 1
+                else np.array([0.0])
+            )
             ax.scatter(
                 positions + jitter,
                 group_frame[metric_col].to_numpy(dtype=float),
@@ -856,7 +913,7 @@ def _plot_trace_job(
 
     if mode == "overlay":
         fig, ax = plt.subplots(1, 1, figsize=figsize)
-        for y_col, y_label in zip(y_cols, job.y_labels):
+        for y_col, _y_label in zip(y_cols, job.y_labels, strict=True):
             _apply_curve_mode(
                 ax,
                 trace_df,
@@ -879,7 +936,7 @@ def _plot_trace_job(
         fig, axes = plt.subplots(len(y_cols), 1, figsize=figsize, sharex=True)
         if len(y_cols) == 1:
             axes = [axes]
-        for ax, y_col, y_label in zip(axes, y_cols, job.y_labels):
+        for ax, y_col, y_label in zip(axes, y_cols, job.y_labels, strict=True):
             _apply_curve_mode(
                 ax,
                 trace_df,
@@ -1023,7 +1080,9 @@ def segment_index_columns(segment_key: str) -> tuple[str, str]:
         raise PlotSpecError(f"Semantic segment '{segment_key}' does not define two QC columns.")
     if not _segment_is_index_based(segment_key):
         raise PlotSpecError(
-            f"Semantic segment '{segment_key}' uses value-based QC markers and is not supported by the shared slice/rebase path."
+            "Semantic segment "
+            f"'{segment_key}' uses value-based QC markers "
+            "and is not supported by the shared slice/rebase path."
         )
     start_column, end_column = segment.qc_columns
     return start_column, end_column
@@ -1083,7 +1142,9 @@ def _resolve_frame_file_name(file_key: Any, frame: pd.DataFrame) -> str:
     return file_name or "<unknown file>"
 
 
-def _resolve_qc_row(file_key: Any, frame: pd.DataFrame, qc_lookup: dict[str, pd.Series]) -> pd.Series | None:
+def _resolve_qc_row(
+    file_key: Any, frame: pd.DataFrame, qc_lookup: dict[str, pd.Series]
+) -> pd.Series | None:
     """Look up the QC summary row for one trace frame."""
     qc_row = qc_lookup.get(str(file_key).strip())
     if qc_row is None and "Filename" in frame.columns:
@@ -1103,12 +1164,23 @@ def _prepare_segment_frame(
     file_name = _resolve_frame_file_name(file_key, frame)
     qc_row = _resolve_qc_row(file_key, frame, qc_lookup)
     if qc_row is None:
-        return None, None, f"{job.spec_title}: segment '{job.segment_key}' skipped for {file_name}: missing QC summary row."
+        return (
+            None,
+            None,
+            f"{job.spec_title}: segment '{job.segment_key}' skipped "
+            f"for {file_name}: missing QC summary row.",
+        )
 
     try:
-        prepared_frame = _slice_trace_to_segment(frame, qc_row, job.segment_key or "", job.x_label, rebase_x=job.rebase_x)
+        prepared_frame = _slice_trace_to_segment(
+            frame, qc_row, job.segment_key or "", job.x_label, rebase_x=job.rebase_x
+        )
     except PlotSpecError as exc:
-        return None, None, f"{job.spec_title}: segment '{job.segment_key}' skipped for {file_name}: {exc}."
+        return (
+            None,
+            None,
+            f"{job.spec_title}: segment '{job.segment_key}' skipped for {file_name}: {exc}.",
+        )
 
     prepared_qc_row = qc_row
     if job.segment_key and job.rebase_x:
@@ -1135,7 +1207,9 @@ def _prepare_grouped_trace_data(
         frame = raw_frame.sort_values(x_col).reset_index(drop=True)
         if frame.empty:
             continue
-        prepared_frame, prepared_qc_row, warning = _prepare_segment_frame(frame, file_key, qc_lookup, job)
+        prepared_frame, prepared_qc_row, warning = _prepare_segment_frame(
+            frame, file_key, qc_lookup, job
+        )
         if warning is not None:
             warnings.append(warning)
             continue
@@ -1150,7 +1224,9 @@ def _prepare_grouped_trace_data(
         segment_qc_lookup[_resolve_frame_file_name(file_key, frame)] = prepared_qc_row
 
     if not segment_frames:
-        warnings.append(f"{job.spec_title}: segment '{job.segment_key}' is unavailable for all files.")
+        warnings.append(
+            f"{job.spec_title}: segment '{job.segment_key}' is unavailable for all files."
+        )
         raise PlotSpecError(" | ".join(warnings))
     return pd.concat(segment_frames, ignore_index=True), segment_qc_lookup, warnings
 
@@ -1171,15 +1247,21 @@ def _prepare_selected_sample_data(
     )
 
     for sample_name in job.selected_samples:
-        sample_frame = trace_df[trace_df["File"].astype(str).eq(sample_name) | filename_mask_source.eq(sample_name)].copy()
+        sample_frame = trace_df[
+            trace_df["File"].astype(str).eq(sample_name) | filename_mask_source.eq(sample_name)
+        ].copy()
         if sample_frame.empty:
-            warnings.append(f"{job.spec_title}: selected sample '{sample_name}' skipped: missing trace rows.")
+            warnings.append(
+                f"{job.spec_title}: selected sample '{sample_name}' skipped: missing trace rows."
+            )
             continue
 
         sample_frame = sample_frame.sort_values(x_col).reset_index(drop=True)
         sample_qc_row: pd.Series | None = _resolve_qc_row(sample_name, sample_frame, qc_lookup)
         if job.segment_key:
-            prepared_frame, prepared_qc_row, warning = _prepare_segment_frame(sample_frame, sample_name, qc_lookup, job)
+            prepared_frame, prepared_qc_row, warning = _prepare_segment_frame(
+                sample_frame, sample_name, qc_lookup, job
+            )
             if warning is not None:
                 warnings.append(warning)
                 continue
@@ -1223,7 +1305,9 @@ def _render_composed_annotations(
             x_vals = frame[x_col].to_numpy(dtype=float)
             y_vals = frame[y_col].to_numpy(dtype=float)
 
-            columns = _overlay_required_columns(CustomGraphOverlay(kind="annotation", key=annotation.key))
+            columns = _overlay_required_columns(
+                CustomGraphOverlay(kind="annotation", key=annotation.key)
+            )
             if not columns:
                 continue
 
@@ -1239,7 +1323,14 @@ def _render_composed_annotations(
 
             xs = [point[0] for point in marker_points]
             ys = [point[1] for point in marker_points]
-            ax.scatter(xs, ys, color="#7C2D12", s=26, zorder=5, label=annotation_meta.label if not drawn else "")
+            ax.scatter(
+                xs,
+                ys,
+                color="#7C2D12",
+                s=26,
+                zorder=5,
+                label=annotation_meta.label if not drawn else "",
+            )
             anchor_idx = int(np.argmax(xs))
             ax.annotate(
                 annotation_meta.label,
@@ -1252,7 +1343,9 @@ def _render_composed_annotations(
             drawn = True
 
         if not drawn:
-            warnings.append(f"annotation '{annotation.key}' skipped: required QC values were unavailable.")
+            warnings.append(
+                f"annotation '{annotation.key}' skipped: required QC values were unavailable."
+            )
     return warnings
 
 
@@ -1269,7 +1362,9 @@ def _render_composed_overlay(
         return _render_segment_regression_overlay(ax, trace_df, x_col, y_col, overlay)
 
     qc_columns = {column for row in qc_lookup.values() for column in row.index}
-    missing_columns = [column for column in _overlay_required_columns(overlay) if column not in qc_columns]
+    missing_columns = [
+        column for column in _overlay_required_columns(overlay) if column not in qc_columns
+    ]
     if missing_columns:
         return f"overlay '{overlay.key}' skipped: missing columns {', '.join(missing_columns)}"
 
@@ -1289,7 +1384,13 @@ def _render_composed_overlay(
         x_vals = frame[x_col].to_numpy(dtype=float)
         y_vals = frame[y_col].to_numpy(dtype=float)
 
-        if overlay.key in {"b1_start_to_peak1", "peak1_to_b1_end", "b1_end_to_b2_start", "b2_start_to_peak2", "peak2_to_b2_end"}:
+        if overlay.key in {
+            "b1_start_to_peak1",
+            "peak1_to_b1_end",
+            "b1_end_to_b2_start",
+            "b2_start_to_peak2",
+            "peak2_to_b2_end",
+        }:
             start_column, end_column = _overlay_required_columns(overlay)
             start_idx = _overlay_index(frame, qc_row, start_column)
             end_idx = _overlay_index(frame, qc_row, end_column)
@@ -1363,7 +1464,11 @@ def _render_composed_overlay(
                 right_float = float(right_value)
             except (TypeError, ValueError):
                 continue
-            if not np.isfinite(left_float) or not np.isfinite(right_float) or right_float <= left_float:
+            if (
+                not np.isfinite(left_float)
+                or not np.isfinite(right_float)
+                or right_float <= left_float
+            ):
                 continue
             ax.axvspan(
                 left_float,
@@ -1425,7 +1530,9 @@ def _plot_composed_trace_job(
         )
 
     try:
-        render_trace_df, render_qc_lookup, warnings = _prepare_grouped_trace_data(trace_df, qc_lookup, job, x_col)
+        render_trace_df, render_qc_lookup, warnings = _prepare_grouped_trace_data(
+            trace_df, qc_lookup, job, x_col
+        )
     except PlotSpecError as exc:
         message = str(exc)
         if " | " in message:
@@ -1550,7 +1657,9 @@ def _render_composed_trace_figure(
     ax_left.set_ylabel(" / ".join(axis_label(layer.variable) for layer in job.left_layers))
     ax_left.set_title(f"{job.spec_title} [{job.x_label}]")
     ax_left.grid(True, linestyle="--", alpha=0.25)
-    _apply_axis_legend(ax_left, group_order=group_order, extra_axes=[ax_right] if ax_right is not None else None)
+    _apply_axis_legend(
+        ax_left, group_order=group_order, extra_axes=[ax_right] if ax_right is not None else None
+    )
 
     fig.tight_layout()
     path = _allocate_plot_path(
@@ -1583,7 +1692,11 @@ def _render_selected_sample_overlay_axis(
             x_col = _require_column(sample_frame, job.x_label)
             y_col = _require_column(sample_frame, layer.variable)
             ordered = sample_frame.sort_values(x_col)
-            label = sample_name if len(job.left_layers) == 1 and job.right_layer is None else f"{sample_name} · {layer.variable}"
+            label = (
+                sample_name
+                if len(job.left_layers) == 1 and job.right_layer is None
+                else f"{sample_name} · {layer.variable}"
+            )
             ax_left.plot(
                 ordered[x_col],
                 ordered[y_col],
@@ -1617,9 +1730,7 @@ def _render_selected_sample_overlay_axis(
 
     combined_trace = pd.concat([frame for _, frame, _ in prepared_samples], ignore_index=True)
     combined_lookup = {
-        sample_name: qc_row
-        for sample_name, _, qc_row in prepared_samples
-        if qc_row is not None
+        sample_name: qc_row for sample_name, _, qc_row in prepared_samples if qc_row is not None
     }
     x_col = _require_column(combined_trace, job.x_label)
 
@@ -1686,7 +1797,9 @@ def _plot_selected_sample_trace_job(
         ax_left.set_ylabel(" / ".join(axis_label(layer.variable) for layer in job.left_layers))
         ax_left.set_title(f"{job.spec_title} [{job.x_label}]")
         ax_left.grid(True, linestyle="--", alpha=0.25)
-        _apply_axis_legend(ax_left, group_order=None, extra_axes=[ax_right] if ax_right is not None else None)
+        _apply_axis_legend(
+            ax_left, group_order=None, extra_axes=[ax_right] if ax_right is not None else None
+        )
         fig.tight_layout()
         path = _allocate_plot_path(output_dir, job.spec_title, job.x_label, allocated_stems)
         fig.savefig(path, dpi=figure_config.dpi, bbox_inches="tight")
@@ -1736,7 +1849,9 @@ def _plot_selected_sample_trace_job(
         axes = [axes]
 
     legend_axes: list[Any] = []
-    for ax, (sample_name, sample_frame, sample_qc_row) in zip(axes, prepared_samples):
+    for ax, (sample_name, sample_frame, sample_qc_row) in zip(
+        axes, prepared_samples, strict=True
+    ):
         sample_lookup = {sample_name: sample_qc_row} if sample_qc_row is not None else {}
         ax_right, render_warnings = _render_composed_trace_axis(
             ax,
@@ -1791,7 +1906,9 @@ def _plot_metric_job(
     if mode == "overlay" and x_meta.column == "Group":
         fig, ax = plt.subplots(1, 1, figsize=figsize)
         for y_label in job.y_labels:
-            _plot_metric_group_axis(ax, metrics_df, y_label, style, job.metric_view, group_order, stats_by_metric)
+            _plot_metric_group_axis(
+                ax, metrics_df, y_label, style, job.metric_view, group_order, stats_by_metric
+            )
         ax.set_xlabel("Group")
         ax.set_title(f"{job.spec_title} [{job.x_label}]")
         handles, labels = ax.get_legend_handles_labels()
@@ -1802,9 +1919,11 @@ def _plot_metric_job(
         fig, axes = plt.subplots(len(job.y_labels), 1, figsize=figsize, sharex=False)
         if len(job.y_labels) == 1:
             axes = [axes]
-        for ax, y_label in zip(axes, job.y_labels):
+        for ax, y_label in zip(axes, job.y_labels, strict=True):
             if x_meta.column == "Group":
-                _plot_metric_group_axis(ax, metrics_df, y_label, style, job.metric_view, group_order, stats_by_metric)
+                _plot_metric_group_axis(
+                    ax, metrics_df, y_label, style, job.metric_view, group_order, stats_by_metric
+                )
                 ax.set_xlabel("Group")
             elif x_meta.column == "Filename":
                 _plot_metric_filename_axis(ax, metrics_df, y_label, style)
@@ -1840,14 +1959,20 @@ def plot_trace_stack(
     y_labels = ["Force (N)", "Deformation (mm)"]
     curve_mode = str((spec or {}).get("curve_mode", "individual"))
     band_mode = str((spec or {}).get("band_mode", "sd"))
-    group_order = [str(group).strip() for group in (spec or {}).get("group_order", []) if str(group).strip()]
+    group_order = [
+        str(group).strip() for group in (spec or {}).get("group_order", []) if str(group).strip()
+    ]
     x_col = _require_column(trace_df, x_label)
 
-    fig, axes = plt.subplots(2, 1, figsize=figure_config.resolve_size(default=(10.0, 8.0)), sharex=True)
+    fig, axes = plt.subplots(
+        2, 1, figsize=figure_config.resolve_size(default=(10.0, 8.0)), sharex=True
+    )
     for idx, y_label in enumerate(y_labels):
         y_col = _require_column(trace_df, y_label)
         ax = axes[idx]
-        _apply_curve_mode(ax, trace_df, x_col, y_col, style, curve_mode, band_mode, group_order=group_order)
+        _apply_curve_mode(
+            ax, trace_df, x_col, y_col, style, curve_mode, band_mode, group_order=group_order
+        )
         ax.set_ylabel(axis_label(y_label))
         ax.grid(True, linestyle="--", alpha=0.25)
 
@@ -1887,7 +2012,11 @@ def plot_custom_graphs(
 
     for raw_spec in graph_specs:
         try:
-            spec = normalize_composed_graph_spec(raw_spec) if _is_composed_graph_payload(raw_spec) else normalize_graph_spec(raw_spec)
+            spec = (
+                normalize_composed_graph_spec(raw_spec)
+                if _is_composed_graph_payload(raw_spec)
+                else normalize_graph_spec(raw_spec)
+            )
         except PlotSpecError as exc:
             warnings.append(f"{_graph_spec_title(raw_spec)}: {exc}")
             continue
@@ -1977,7 +2106,8 @@ def export_qc_report(
             guide_target.write_text(guide_source.read_text(encoding="utf-8"), encoding="utf-8")
         else:
             guide_target.write_text(
-                "QC guide missing in project root. See repository file QC_REPORT_INTERPRETATION.md.",
+                "QC guide missing in project root. "
+                "See repository file QC_REPORT_INTERPRETATION.md.",
                 encoding="utf-8",
             )
             warnings.append("QC interpretation guide source file was not found in project root.")
@@ -1987,7 +2117,10 @@ def export_qc_report(
     if trace_df.empty:
         return {"paths": saved_paths, "warnings": ["QC report skipped: trace dataframe is empty."]}
     if qc_df.empty:
-        return {"paths": saved_paths, "warnings": ["QC report skipped: QC summary dataframe is empty."]}
+        return {
+            "paths": saved_paths,
+            "warnings": ["QC report skipped: QC summary dataframe is empty."],
+        }
 
     qc_sorted = qc_df.copy()
     for key in ["Group", "Filename"]:
@@ -2091,17 +2224,31 @@ def export_qc_report(
             figsize=figure_config.resolve_size(default=(11.0, 8.5)),
             sharex=False,
         )
-        ax_force.plot(time_vals, force_vals, color="#1F2937", linewidth=1.6, label="Force corrected")
+        ax_force.plot(
+            time_vals, force_vals, color="#1F2937", linewidth=1.6, label="Force corrected"
+        )
         ax_force.axhline(0.0, color="#64748B", linewidth=0.9, linestyle="--", alpha=0.7)
-        ax_force.axhline(trigger, color="#0EA5E9", linewidth=0.9, linestyle=":", alpha=0.9, label="Trigger")
+        ax_force.axhline(
+            trigger, color="#0EA5E9", linewidth=0.9, linestyle=":", alpha=0.9, label="Trigger"
+        )
 
-        def _fill_segment(start_idx: int, end_idx: int, color: str, label: str, positive_only: bool | None) -> None:
+        def _fill_segment(
+            start_idx: int,
+            end_idx: int,
+            color: str,
+            label: str,
+            positive_only: bool | None,
+            *,
+            time_points: np.ndarray,
+            force_points: np.ndarray,
+            force_axis: Any,
+        ) -> None:
             """Fill an area between markers on the force trace."""
             left, right = sorted((start_idx, end_idx))
             if right - left < 1:
                 return
-            x_seg = time_vals[left : right + 1]
-            y_seg = force_vals[left : right + 1]
+            x_seg = time_points[left : right + 1]
+            y_seg = force_points[left : right + 1]
             if len(x_seg) < 2:
                 return
             if positive_only is True:
@@ -2112,11 +2259,47 @@ def export_qc_report(
                 where = np.ones_like(y_seg, dtype=bool)
             if int(where.sum()) < 2:
                 return
-            ax_force.fill_between(x_seg, 0.0, y_seg, where=where, interpolate=True, color=color, alpha=0.25, label=label)
+            force_axis.fill_between(
+                x_seg,
+                0.0,
+                y_seg,
+                where=where,
+                interpolate=True,
+                color=color,
+                alpha=0.25,
+                label=label,
+            )
 
-        _fill_segment(b1s, b1e, "#93C5FD", "A1", True)
-        _fill_segment(b2s, b2e, "#86EFAC", "A2", True)
-        _fill_segment(b1e, b2s, "#FCA5A5", "Adhesiveness", False)
+        _fill_segment(
+            b1s,
+            b1e,
+            "#93C5FD",
+            "A1",
+            True,
+            time_points=time_vals,
+            force_points=force_vals,
+            force_axis=ax_force,
+        )
+        _fill_segment(
+            b2s,
+            b2e,
+            "#86EFAC",
+            "A2",
+            True,
+            time_points=time_vals,
+            force_points=force_vals,
+            force_axis=ax_force,
+        )
+        _fill_segment(
+            b1e,
+            b2s,
+            "#FCA5A5",
+            "Adhesiveness",
+            False,
+            time_points=time_vals,
+            force_points=force_vals,
+            force_axis=ax_force,
+        )
 
         marker_specs = [
             (b1s, "B1 start", "#0EA5E9"),
@@ -2130,7 +2313,14 @@ def export_qc_report(
             x_val = time_vals[index]
             y_val = force_vals[index]
             ax_force.scatter([x_val], [y_val], s=20, color=color, zorder=4)
-            ax_force.annotate(label, (x_val, y_val), textcoords="offset points", xytext=(5, 5), fontsize=7.5, color=color)
+            ax_force.annotate(
+                label,
+                (x_val, y_val),
+                textcoords="offset points",
+                xytext=(5, 5),
+                fontsize=7.5,
+                color=color,
+            )
 
         text_lines = [
             f"A1={_safe_float(row, 'A1 Area (N*s)', 0.0):.3f} N*s",
@@ -2161,7 +2351,9 @@ def export_qc_report(
         if int(finite_mask.sum()) >= 3:
             strain_plot = strain_vals[finite_mask]
             stress_plot = stress_vals[finite_mask]
-            ax_stress.plot(strain_plot, stress_plot, color="#B45309", linewidth=1.6, label="Stress-strain")
+            ax_stress.plot(
+                strain_plot, stress_plot, color="#B45309", linewidth=1.6, label="Stress-strain"
+            )
             if np.isfinite(mmin) and np.isfinite(mmax) and mmax > mmin:
                 ax_stress.axvspan(mmin, mmax, color="#FDE68A", alpha=0.35, label="Modulus window")
 
@@ -2189,7 +2381,14 @@ def export_qc_report(
                     label=f"Fit slope={slope:.1f} kPa",
                 )
         else:
-            ax_stress.text(0.5, 0.5, "Stress/strain unavailable", transform=ax_stress.transAxes, ha="center", va="center")
+            ax_stress.text(
+                0.5,
+                0.5,
+                "Stress/strain unavailable",
+                transform=ax_stress.transAxes,
+                ha="center",
+                va="center",
+            )
 
         ax_stress.set_title("Modulus Context (True Stress vs True Strain)")
         ax_stress.set_xlabel("True Strain (%)")
@@ -2234,25 +2433,42 @@ def plot_grouped_metrics(
 
     cols = 2
     rows = ceil(len(present_metrics) / cols)
-    fig, axes = plt.subplots(rows, cols, figsize=figure_config.resolve_size(default=(12.0, max(8.0, rows * 3.5))))
+    fig, axes = plt.subplots(
+        rows, cols, figsize=figure_config.resolve_size(default=(12.0, max(8.0, rows * 3.5)))
+    )
     flat_axes = np.atleast_1d(axes).flatten()
 
     for ax in flat_axes[len(present_metrics) :]:
         ax.axis("off")
 
-    for ax, metric in zip(flat_axes, present_metrics):
+    for ax, metric in zip(flat_axes, present_metrics, strict=True):
         summary = stats_by_metric[metric]["summary_df"].copy()
         group_col = stats_by_metric[metric]["test_info"]["group_col"]
         groups = summary[group_col].astype(str).tolist()
         means = summary["Mean"].to_numpy(dtype=float)
         sds = summary["SD"].to_numpy(dtype=float)
         letters = summary["Significance"].astype(str).tolist()
-        bars = ax.bar(groups, means, yerr=sds, capsize=4, color=[style.get_color(group) for group in groups], alpha=0.9)
+        bars = ax.bar(
+            groups,
+            means,
+            yerr=sds,
+            capsize=4,
+            color=[style.get_color(group) for group in groups],
+            alpha=0.9,
+        )
 
         ymax = float(np.nanmax(means + sds)) if len(means) else 1.0
         offset = max(ymax * 0.04, 0.02)
-        for bar, letter, mean, sd in zip(bars, letters, means, sds):
-            ax.text(bar.get_x() + bar.get_width() / 2, mean + sd + offset, letter, ha="center", va="bottom", fontsize=10, fontweight="bold")
+        for bar, letter, mean, sd in zip(bars, letters, means, sds, strict=True):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                mean + sd + offset,
+                letter,
+                ha="center",
+                va="bottom",
+                fontsize=10,
+                fontweight="bold",
+            )
 
         ax.set_title(metric)
         ax.set_ylabel(metric)
@@ -2281,11 +2497,15 @@ def plot_overlay_traces(
     band_mode = str(overlay_spec.get("band_mode", "sd"))
     x_label = str(overlay_spec.get("x_col", "Aligned Time (s)"))
     y_labels = list(overlay_spec.get("y_cols", ["Force (N)", "Deformation (mm)"]))
-    group_order = [str(group).strip() for group in overlay_spec.get("group_order", []) if str(group).strip()]
+    group_order = [
+        str(group).strip() for group in overlay_spec.get("group_order", []) if str(group).strip()
+    ]
 
     x_col = _require_column(trace_df, x_label)
     y_cols = [_require_column(trace_df, label) for label in y_labels]
-    ordered_groups = _categorical_order(trace_df["Group"].dropna().astype(str).tolist(), preferred_order=group_order)
+    ordered_groups = _categorical_order(
+        trace_df["Group"].dropna().astype(str).tolist(), preferred_order=group_order
+    )
     unique_groups: list[str] = []
     for group in ordered_groups:
         if group not in unique_groups:
@@ -2296,10 +2516,12 @@ def plot_overlay_traces(
         group_frame = trace_df[trace_df["Group"].astype(str) == group_name]
         if group_frame.empty:
             continue
-        fig, axes = plt.subplots(len(y_cols), 1, figsize=figure_config.resolve_size(default=(10.0, 7.5)), sharex=True)
+        fig, axes = plt.subplots(
+            len(y_cols), 1, figsize=figure_config.resolve_size(default=(10.0, 7.5)), sharex=True
+        )
         if len(y_cols) == 1:
             axes = [axes]
-        for ax, y_col, y_label in zip(axes, y_cols, y_labels):
+        for ax, y_col, y_label in zip(axes, y_cols, y_labels, strict=True):
             _apply_curve_mode(
                 ax,
                 group_frame,
@@ -2328,12 +2550,16 @@ def _serialize_graph_spec(spec: Any) -> dict[str, Any]:
         return asdict(spec)
     if isinstance(spec, dict):
         return {
-            key: _serialize_graph_spec(value) if is_dataclass(value) or isinstance(value, dict) else value
+            key: _serialize_graph_spec(value)
+            if is_dataclass(value) or isinstance(value, dict)
+            else value
             for key, value in spec.items()
         }
     raise TypeError(f"Unsupported graph spec payload: {type(spec)!r}")
 
 
-def serialize_graph_specs(graph_specs: list[GraphSpec | CustomGraphSpec | dict[str, Any]]) -> list[dict[str, Any]]:
+def serialize_graph_specs(
+    graph_specs: list[GraphSpec | CustomGraphSpec | dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Serialize graph specs for session persistence."""
     return [_serialize_graph_spec(spec) for spec in graph_specs]

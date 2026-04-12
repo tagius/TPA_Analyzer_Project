@@ -69,7 +69,9 @@ def build_stats_exports(
             pairwise_frames.append(pairwise)
 
     summary_df = pd.concat(summary_frames, ignore_index=True) if summary_frames else pd.DataFrame()
-    pairwise_df = pd.concat(pairwise_frames, ignore_index=True) if pairwise_frames else pd.DataFrame()
+    pairwise_df = (
+        pd.concat(pairwise_frames, ignore_index=True) if pairwise_frames else pd.DataFrame()
+    )
     return summary_df, pairwise_df
 
 
@@ -91,8 +93,12 @@ def export_tables_bundle(
     metrics_df.to_csv(root / "tpa_results_summary.csv", index=False)
     (qc_df if not qc_df.empty else pd.DataFrame()).to_csv(root / "tpa_qc_summary.csv", index=False)
     summary_df, pairwise_df = build_stats_exports(stats_results)
-    (summary_df if not summary_df.empty else pd.DataFrame()).to_csv(root / "tpa_group_stats.csv", index=False)
-    (pairwise_df if not pairwise_df.empty else pd.DataFrame()).to_csv(root / "tpa_pairwise_stats.csv", index=False)
+    (summary_df if not summary_df.empty else pd.DataFrame()).to_csv(
+        root / "tpa_group_stats.csv", index=False
+    )
+    (pairwise_df if not pairwise_df.empty else pd.DataFrame()).to_csv(
+        root / "tpa_pairwise_stats.csv", index=False
+    )
 
 
 def export_plot_bundle(
@@ -117,7 +123,11 @@ def export_plot_bundle(
     try:
         plot_trace_stack(
             trace_df,
-            spec={"curve_mode": overlay_mode if overlay_mode != "individual" else "individual", "band_mode": band_mode, "group_order": group_order},
+            spec={
+                "curve_mode": overlay_mode if overlay_mode != "individual" else "individual",
+                "band_mode": band_mode,
+                "group_order": group_order,
+            },
             style=style,
             output_path=plot_root / "default_stack.png",
             figure_config=fig_cfg,

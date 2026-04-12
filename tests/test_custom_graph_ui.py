@@ -151,9 +151,13 @@ def test_segment_options_enable_when_qc_markers_are_available(tmp_path: Path) ->
     asyncio.run(scenario())
 
 
-def test_segment_selection_triggers_one_autosave_when_builder_is_synchronized(tmp_path: Path) -> None:
+def test_segment_selection_triggers_one_autosave_when_builder_is_synchronized(
+    tmp_path: Path,
+) -> None:
     async def scenario() -> None:
-        app = TPAAnalyzerApp(settings=AppSettings(default_data_dir=str(tmp_path), session_autosave_enabled=True))
+        app = TPAAnalyzerApp(
+            settings=AppSettings(default_data_dir=str(tmp_path), session_autosave_enabled=True)
+        )
         autosave_calls = 0
         original_autosave = app._autosave_session
 
@@ -217,9 +221,13 @@ def test_segment_selection_triggers_one_autosave_when_builder_is_synchronized(tm
     asyncio.run(scenario())
 
 
-def test_segment_change_triggers_one_autosave_when_builder_repopulates_controls(tmp_path: Path) -> None:
+def test_segment_change_triggers_one_autosave_when_builder_repopulates_controls(
+    tmp_path: Path,
+) -> None:
     async def scenario() -> None:
-        app = TPAAnalyzerApp(settings=AppSettings(default_data_dir=str(tmp_path), session_autosave_enabled=True))
+        app = TPAAnalyzerApp(
+            settings=AppSettings(default_data_dir=str(tmp_path), session_autosave_enabled=True)
+        )
         autosave_calls = 0
         original_autosave = app._autosave_session
 
@@ -295,9 +303,13 @@ def test_segment_change_triggers_one_autosave_when_builder_repopulates_controls(
     asyncio.run(scenario())
 
 
-def test_generic_select_autosave_guard_skips_same_value_builder_option_refresh(tmp_path: Path) -> None:
+def test_generic_select_autosave_guard_skips_same_value_builder_option_refresh(
+    tmp_path: Path,
+) -> None:
     async def scenario() -> None:
-        app = TPAAnalyzerApp(settings=AppSettings(default_data_dir=str(tmp_path), session_autosave_enabled=True))
+        app = TPAAnalyzerApp(
+            settings=AppSettings(default_data_dir=str(tmp_path), session_autosave_enabled=True)
+        )
         autosave_calls = 0
         original_autosave = app._autosave_session
 
@@ -324,12 +336,19 @@ def test_generic_select_autosave_guard_skips_same_value_builder_option_refresh(t
             await pilot.pause()
 
             assert autosave_calls == 0
-            assert app._should_skip_builder_internal_autosave(segment_select.id, str(segment_select.value)) is False
+            assert (
+                app._should_skip_builder_internal_autosave(
+                    segment_select.id, str(segment_select.value)
+                )
+                is False
+            )
 
     asyncio.run(scenario())
 
 
-def test_left_axis_checkbox_triggers_one_autosave_when_builder_is_synchronized(tmp_path: Path) -> None:
+def test_left_axis_checkbox_triggers_one_autosave_when_builder_is_synchronized(
+    tmp_path: Path,
+) -> None:
     async def scenario() -> None:
         app = TPAAnalyzerApp(
             settings=AppSettings(default_data_dir=str(tmp_path), session_autosave_enabled=True)
@@ -383,7 +402,9 @@ def test_left_axis_checkbox_triggers_one_autosave_when_builder_is_synchronized(t
     asyncio.run(scenario())
 
 
-def test_segment_options_reset_when_grouping_change_invalidates_analysis_results(tmp_path: Path) -> None:
+def test_segment_options_reset_when_grouping_change_invalidates_analysis_results(
+    tmp_path: Path,
+) -> None:
     async def scenario() -> None:
         app = _make_app(tmp_path)
 
@@ -490,7 +511,12 @@ def test_right_axis_options_update_when_left_axis_selection_changes(tmp_path: Pa
 
             force_corrected.value = False
             await pilot.pause()
-            assert _select_values(right_axis) == ["__none__", "Force (N)", "Force Corrected (N)", "Deformation (mm)"]
+            assert _select_values(right_axis) == [
+                "__none__",
+                "Force (N)",
+                "Force Corrected (N)",
+                "Deformation (mm)",
+            ]
             assert deformation.display is True
 
     asyncio.run(scenario())
@@ -651,8 +677,18 @@ def test_plot_builder_defaults_to_all_samples_overlay_mode(tmp_path: Path) -> No
                 ),
                 pd.DataFrame(
                     [
-                        {"Filename": "sample-a.csv", "Group": "Control", "Bite1 Start Index": 0, "Peak1 Index": 1},
-                        {"Filename": "sample-b.csv", "Group": "Treatment", "Bite1 Start Index": 0, "Peak1 Index": 1},
+                        {
+                            "Filename": "sample-a.csv",
+                            "Group": "Control",
+                            "Bite1 Start Index": 0,
+                            "Peak1 Index": 1,
+                        },
+                        {
+                            "Filename": "sample-b.csv",
+                            "Group": "Treatment",
+                            "Bite1 Start Index": 0,
+                            "Peak1 Index": 1,
+                        },
                     ]
                 ),
                 {},
@@ -681,7 +717,9 @@ def test_plot_builder_defaults_to_all_samples_overlay_mode(tmp_path: Path) -> No
     asyncio.run(scenario())
 
 
-def test_space_toggles_builder_samples_with_visible_markers_without_touching_grouping_assignments(tmp_path: Path) -> None:
+def test_space_toggles_builder_samples_with_visible_markers_without_touching_grouping_assignments(
+    tmp_path: Path,
+) -> None:
     async def scenario() -> None:
         app = _make_app(tmp_path)
 
@@ -725,8 +763,18 @@ def test_space_toggles_builder_samples_with_visible_markers_without_touching_gro
                 ),
                 pd.DataFrame(
                     [
-                        {"Filename": "sample-a.csv", "Group": "Control", "Bite1 Start Index": 0, "Peak1 Index": 1},
-                        {"Filename": "sample-b.csv", "Group": "Treatment", "Bite1 Start Index": 0, "Peak1 Index": 1},
+                        {
+                            "Filename": "sample-a.csv",
+                            "Group": "Control",
+                            "Bite1 Start Index": 0,
+                            "Peak1 Index": 1,
+                        },
+                        {
+                            "Filename": "sample-b.csv",
+                            "Group": "Treatment",
+                            "Bite1 Start Index": 0,
+                            "Peak1 Index": 1,
+                        },
                     ]
                 ),
                 {},
@@ -754,7 +802,11 @@ def test_space_toggles_builder_samples_with_visible_markers_without_touching_gro
             await pilot.pause()
             await pilot.press("space")
             await pilot.pause()
-            assert _selected_builder_prompts(sample_list) == ["* All samples", "* sample-a.csv", "* sample-b.csv"]
+            assert _selected_builder_prompts(sample_list) == [
+                "* All samples",
+                "* sample-a.csv",
+                "* sample-b.csv",
+            ]
 
             spec = app._collect_graph_spec_from_ui()
             assert spec.selected_samples == ["sample-a.csv", "sample-b.csv"]
@@ -784,7 +836,16 @@ def test_collect_graph_spec_requires_at_least_one_selected_sample(tmp_path: Path
                         }
                     ]
                 ),
-                pd.DataFrame([{"Filename": "sample-a.csv", "Group": "Control", "Bite1 Start Index": 0, "Peak1 Index": 0}]),
+                pd.DataFrame(
+                    [
+                        {
+                            "Filename": "sample-a.csv",
+                            "Group": "Control",
+                            "Bite1 Start Index": 0,
+                            "Peak1 Index": 0,
+                        }
+                    ]
+                ),
                 {},
                 [],
                 [],
@@ -804,7 +865,9 @@ def test_collect_graph_spec_requires_at_least_one_selected_sample(tmp_path: Path
     asyncio.run(scenario())
 
 
-def test_segment_regression_options_follow_selected_segment_and_include_peak2_window(tmp_path: Path) -> None:
+def test_segment_regression_options_follow_selected_segment_and_include_peak2_window(
+    tmp_path: Path,
+) -> None:
     async def scenario() -> None:
         app = _make_app(tmp_path)
 
@@ -874,8 +937,20 @@ def test_export_all_uses_filtered_metrics_payload(tmp_path: Path, monkeypatch) -
         async with app.run_test() as pilot:
             app.trace_df = pd.DataFrame(
                 [
-                    {"Filename": "blank.csv", "File": "blank.csv", "Group": "", "Time (s)": 0.0, "Force (N)": 1.0},
-                    {"Filename": "control.csv", "File": "control.csv", "Group": "Control", "Time (s)": 0.0, "Force (N)": 2.0},
+                    {
+                        "Filename": "blank.csv",
+                        "File": "blank.csv",
+                        "Group": "",
+                        "Time (s)": 0.0,
+                        "Force (N)": 1.0,
+                    },
+                    {
+                        "Filename": "control.csv",
+                        "File": "control.csv",
+                        "Group": "Control",
+                        "Time (s)": 0.0,
+                        "Force (N)": 2.0,
+                    },
                 ]
             )
             app.metrics_df = pd.DataFrame(
@@ -944,8 +1019,15 @@ def test_graph_list_supports_deleting_one_saved_custom_graph(tmp_path: Path) -> 
 
         async with app.run_test() as pilot:
             app.graph_specs = [
-                GraphSpec(title="First", plot_type="trace", x_cols=["Time (s)"], y_cols=["Force (N)"]),
-                GraphSpec(title="Second", plot_type="trace", x_cols=["Aligned Time (s)"], y_cols=["Force (N)"]),
+                GraphSpec(
+                    title="First", plot_type="trace", x_cols=["Time (s)"], y_cols=["Force (N)"]
+                ),
+                GraphSpec(
+                    title="Second",
+                    plot_type="trace",
+                    x_cols=["Aligned Time (s)"],
+                    y_cols=["Force (N)"],
+                ),
             ]
             app.selected_graph_spec_index = 0
             app._render_graph_specs()

@@ -45,7 +45,9 @@ def test_parse_zwick_data_requires_expected_columns(tmp_path: Path) -> None:
 
 def test_calculate_tpa_returns_metrics_and_trace_data() -> None:
     """A valid two-peak trace should produce metrics and trace payloads."""
-    result = calculate_tpa(_synthetic_trace(), config=TPAConfig(), file_id="sample.csv", group="ctrl")
+    result = calculate_tpa(
+        _synthetic_trace(), config=TPAConfig(), file_id="sample.csv", group="ctrl"
+    )
     assert result["Hardness (N)"] > 0
     assert result["Springiness"] > 0
     assert isinstance(result["Trace Data"], pd.DataFrame)
