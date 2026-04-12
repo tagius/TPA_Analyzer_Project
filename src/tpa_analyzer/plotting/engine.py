@@ -2441,7 +2441,8 @@ def plot_grouped_metrics(
     for ax in flat_axes[len(present_metrics) :]:
         ax.axis("off")
 
-    for ax, metric in zip(flat_axes, present_metrics, strict=True):
+    for index, metric in enumerate(present_metrics):
+        ax = flat_axes[index]
         summary = stats_by_metric[metric]["summary_df"].copy()
         group_col = stats_by_metric[metric]["test_info"]["group_col"]
         groups = summary[group_col].astype(str).tolist()

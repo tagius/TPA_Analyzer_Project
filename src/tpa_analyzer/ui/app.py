@@ -2478,7 +2478,10 @@ class TPAAnalyzerApp(App):
         """Write table exports in a worker thread."""
         self.call_from_thread(self._set_buttons_disabled, True)
         try:
-            export_root = current_export_root(self.settings.export_root_name)
+            export_root = current_export_root(
+                self.settings.export_root_name,
+                parent_dir=self._export_base_directory(),
+            )
             export_tables_bundle(export_root, metrics_df, qc_df, stats_results)
             self.call_from_thread(self._set_status, f"Tables exported to {export_root}")
             self.call_from_thread(self._log, f"Tables exported: {export_root}")
@@ -2500,6 +2503,11 @@ class TPAAnalyzerApp(App):
         )
         style.ensure_group_colors(self.group_order.copy())
         return style
+
+    def _export_base_directory(self) -> Path:
+        """Return the directory where export bundles should be created."""
+        anchor = self.active_directory or self.settings.default_data_dir
+        return Path(anchor).expanduser()
 
     @on(Button.Pressed, "#btn_export_plots")
     def trigger_export_plots(self) -> None:
@@ -2546,7 +2554,10 @@ class TPAAnalyzerApp(App):
         """Write plot exports in a worker thread."""
         self.call_from_thread(self._set_buttons_disabled, True)
         try:
-            output_root = current_export_root(self.settings.plots_root_name)
+            output_root = current_export_root(
+                self.settings.plots_root_name,
+                parent_dir=self._export_base_directory(),
+            )
             warnings = export_plot_bundle(
                 root=output_root,
                 trace_df=trace_df,
@@ -2617,7 +2628,10 @@ class TPAAnalyzerApp(App):
         """Write tables and plots into a combined export bundle."""
         self.call_from_thread(self._set_buttons_disabled, True)
         try:
-            root = current_export_root(self.settings.export_root_name)
+            root = current_export_root(
+                self.settings.export_root_name,
+                parent_dir=self._export_base_directory(),
+            )
             export_tables_bundle(root, metrics_df, qc_df, stats_results)
             warnings = export_plot_bundle(
                 root=root,

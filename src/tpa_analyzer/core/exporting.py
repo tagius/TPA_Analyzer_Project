@@ -75,10 +75,14 @@ def build_stats_exports(
     return summary_df, pairwise_df
 
 
-def current_export_root(base_name: str) -> Path:
+def current_export_root(base_name: str, parent_dir: str | Path | None = None) -> Path:
     """Create and return a timestamped export root."""
     stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    root = Path(base_name) / stamp
+    base_root = Path(base_name)
+    if not base_root.is_absolute():
+        anchor = Path(parent_dir) if parent_dir is not None else Path.cwd()
+        base_root = anchor / base_root
+    root = base_root / stamp
     root.mkdir(parents=True, exist_ok=True)
     return root
 

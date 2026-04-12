@@ -26,6 +26,7 @@ from tpa_analyzer.plotting.engine import (
     expand_graph_spec_jobs,
     normalize_graph_spec,
     plot_custom_graphs,
+    plot_grouped_metrics,
     validate_graph_spec,
 )
 from tpa_analyzer.ui.app import filter_assigned_plot_export_payload
@@ -693,6 +694,33 @@ def test_export_plot_bundle_warns_instead_of_aborting_when_trace_exports_are_una
     assert warnings
     assert any("default" in warning.lower() or "stack" in warning.lower() for warning in warnings)
     assert any("overlay" in warning.lower() for warning in warnings)
+
+
+def test_plot_grouped_metrics_supports_single_metric_grid(tmp_path: Path) -> None:
+    """A single metric should render without tripping subplot grid zip mismatches."""
+    stats_by_metric = {
+        "Hardness (N)": {
+            "summary_df": pd.DataFrame(
+                [
+                    {"Group": "Control", "Mean": 2.0, "SD": 0.1, "Significance": "a"},
+                    {"Group": "Treatment", "Mean": 3.0, "SD": 0.2, "Significance": "b"},
+                ]
+            ),
+            "pairwise_df": pd.DataFrame(),
+            "test_info": {"group_col": "Group", "group_order": ["Control", "Treatment"]},
+        }
+    }
+
+    output_path = tmp_path / "grouped_metrics.png"
+    saved_path = plot_grouped_metrics(
+        stats_by_metric=stats_by_metric,
+        style=PlotStyleConfig(),
+        output_path=output_path,
+        figure_config=FigureConfig(dpi=72),
+    )
+
+    assert Path(saved_path) == output_path
+    assert output_path.exists()
 
 
 def test_export_plot_bundle_renders_custom_overlay_from_qc_df(tmp_path) -> None:

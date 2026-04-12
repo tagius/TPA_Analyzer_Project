@@ -225,6 +225,25 @@ def test_collect_session_payload_persists_active_group(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_export_base_directory_prefers_active_raw_directory(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    app = _make_app(tmp_path)
+
+    app.active_directory = raw_dir
+
+    assert app._export_base_directory() == raw_dir
+
+
+def test_export_base_directory_falls_back_to_default_data_dir(tmp_path: Path) -> None:
+    default_dir = tmp_path / "default_raw"
+    app = TPAAnalyzerApp(
+        settings=AppSettings(default_data_dir=default_dir, session_autosave_enabled=False)
+    )
+
+    assert app._export_base_directory() == default_dir
+
+
 def test_load_session_for_directory_ignores_missing_active_group(tmp_path: Path) -> None:
     (tmp_path / "sample_a.csv").write_text("x", encoding="utf-8")
     app = _make_app(tmp_path)
