@@ -2,6 +2,11 @@ name: Build Binaries
 
 on:
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Version to embed in built binaries (for example 1.1)"
+        required: false
+        default: "1.1"
   push:
     tags:
       - "v*"
@@ -20,6 +25,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${{ github.event.inputs.release_version }}" ]]; then
+            VERSION="${{ github.event.inputs.release_version }}"
+          else
+            VERSION="1.1"
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -77,9 +95,9 @@ jobs:
             <key>CFBundleIdentifier</key>
             <string>com.tpa.analyzer</string>
             <key>CFBundleVersion</key>
-            <string>1.0.0</string>
+            <string>${{ steps.version.outputs.version }}</string>
             <key>CFBundleShortVersionString</key>
-            <string>1.0.0</string>
+            <string>${{ steps.version.outputs.version }}</string>
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleExecutable</key>

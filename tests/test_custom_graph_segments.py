@@ -36,6 +36,7 @@ def test_legacy_overlay_helper_stays_on_existing_segment_set() -> None:
         "peak1_to_b1_end",
         "b1_end_to_b2_start",
         "b2_start_to_peak2",
+        "peak2_to_b2_end",
         "hardness_peak1",
         "adhesiveness",
     ]

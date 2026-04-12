@@ -28,7 +28,9 @@ __pycache__/
 *.pyc
 build/
 dist/
+release/
 *.spec
+*.egg-info/
 exports/
 output_plots/
 .pytest_cache/
