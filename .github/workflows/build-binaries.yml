@@ -26,23 +26,24 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-          cache-dependency-path: requirements.txt
 
-      - name: Install dependencies
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          uv sync --all-groups
 
       - name: Build macOS one-file executable
         if: runner.os == 'macOS'
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --name tpa-analyzer --icon assets/tpa-analyzer-icon.icns --collect-submodules textual --collect-data textual app.py
+          uv run python -m PyInstaller --noconfirm --clean --onefile --name tpa-analyzer --icon assets/tpa-analyzer-icon.icns --collect-submodules textual --collect-data textual app.py
 
       - name: Build Windows one-file executable
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --name tpa-analyzer --icon assets/tpa-analyzer-icon.ico --collect-submodules textual --collect-data textual app.py
+          uv run python -m PyInstaller --noconfirm --clean --onefile --name tpa-analyzer --icon assets/tpa-analyzer-icon.ico --collect-submodules textual --collect-data textual app.py
 
       - name: Prepare macOS artifact
         if: runner.os == 'macOS'

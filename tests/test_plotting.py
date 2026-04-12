@@ -725,6 +725,148 @@ def test_plot_custom_graphs_renders_selected_sample_segment_graph_as_one_stacked
     assert any(axis.get_ylabel() == "Force Corrected (N)" for axis in saved_figures[0].axes[1:])
 
 
+def test_plot_custom_graphs_renders_selected_samples_as_one_overlay_figure_with_distinct_sample_colors(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Overlay display mode should render all selected samples on one axis with per-sample colors."""
+    trace_df, qc_df = _semantic_segment_trace_payload()
+    trace_df["Group"] = "Control"
+    qc_df["Group"] = "Control"
+    spec = CustomGraphSpec(
+        title="Overlay Segment",
+        x_domain="Time (s)",
+        left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+        view_domain="semantic_segment",
+        segment_key="b1_start_to_peak1",
+        rebase_x=True,
+        data_scope="selected_samples",
+        selected_samples=["a.csv", "b.csv"],
+        display_mode="overlay",
+    )
+    saved_figures: list[Figure] = []
+
+    def capture_savefig(self, *args, **kwargs):
+        saved_figures.append(self)
+
+    monkeypatch.setattr(Figure, "savefig", capture_savefig)
+
+    payload = plot_custom_graphs(
+        trace_df=trace_df,
+        metrics_df=pd.DataFrame(),
+        qc_df=qc_df,
+        graph_specs=[spec],
+        style=PlotStyleConfig(),
+        output_dir=tmp_path,
+        figure_config=FigureConfig(dpi=72),
+        group_order=["Control"],
+    )
+
+    assert len(payload["paths"]) == 1
+    assert payload["warnings"] == []
+    assert len(saved_figures) == 1
+    assert len(saved_figures[0].axes) == 1
+
+    ax = saved_figures[0].axes[0]
+    colored_lines = [line for line in ax.lines if len(line.get_xdata())]
+    assert len(colored_lines) == 2
+    assert len({line.get_color() for line in colored_lines}) == 2
+    assert all(line.get_xdata()[0] == pytest.approx(0.0) for line in colored_lines)
+    legend = ax.get_legend()
+    assert legend is not None
+    legend_labels = [text.get_text() for text in legend.get_texts()]
+    assert any("a.csv" in label for label in legend_labels)
+    assert any("b.csv" in label for label in legend_labels)
+
+
+def test_plot_custom_graphs_uses_distinct_colors_for_left_and_right_axes(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Left and right trace axes should not reuse the same curve color family."""
+    trace_df, qc_df = _semantic_segment_trace_payload()
+    spec = CustomGraphSpec(
+        title="Dual Axis Colors",
+        x_domain="Time (s)",
+        left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+        right_axis=CustomGraphAxisLayer(variable="Force Corrected (N)", role="right"),
+        data_scope="grouped",
+    )
+    saved_figures: list[Figure] = []
+
+    def capture_savefig(self, *args, **kwargs):
+        saved_figures.append(self)
+
+    monkeypatch.setattr(Figure, "savefig", capture_savefig)
+
+    payload = plot_custom_graphs(
+        trace_df=trace_df,
+        metrics_df=pd.DataFrame(),
+        qc_df=qc_df,
+        graph_specs=[spec],
+        style=PlotStyleConfig(),
+        output_dir=tmp_path,
+        figure_config=FigureConfig(dpi=72),
+        group_order=["Control", "Treatment"],
+    )
+
+    assert len(payload["paths"]) == 1
+    assert payload["warnings"] == []
+    assert len(saved_figures) == 1
+    assert len(saved_figures[0].axes) == 2
+
+    ax_left, ax_right = saved_figures[0].axes
+    assert ax_left.lines
+    assert ax_right.lines
+    assert ax_left.lines[0].get_color() != ax_right.lines[0].get_color()
+    assert ax_left.yaxis.label.get_color() != ax_right.yaxis.label.get_color()
+
+
+def test_plot_custom_graphs_renders_segment_regression_overlay_on_selected_sample_overlay(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Segment-focused overlay graphs should support a fitted regression line for the chosen segment."""
+    trace_df, qc_df = _semantic_segment_trace_payload()
+    spec = CustomGraphSpec(
+        title="Regression Segment",
+        x_domain="Time (s)",
+        left_axis=[CustomGraphAxisLayer(variable="Force Corrected (N)", role="left")],
+        view_domain="semantic_segment",
+        segment_key="b1_start_to_peak1",
+        rebase_x=True,
+        data_scope="selected_samples",
+        selected_samples=["a.csv", "b.csv"],
+        display_mode="overlay",
+        overlay=CustomGraphOverlay(kind="regression", key="b1_start_to_peak1"),
+    )
+    saved_figures: list[Figure] = []
+
+    def capture_savefig(self, *args, **kwargs):
+        saved_figures.append(self)
+
+    monkeypatch.setattr(Figure, "savefig", capture_savefig)
+
+    payload = plot_custom_graphs(
+        trace_df=trace_df,
+        metrics_df=pd.DataFrame(),
+        qc_df=qc_df,
+        graph_specs=[spec],
+        style=PlotStyleConfig(),
+        output_dir=tmp_path,
+        figure_config=FigureConfig(dpi=72),
+        group_order=["Control", "Treatment"],
+    )
+
+    assert len(payload["paths"]) == 1
+    assert payload["warnings"] == []
+    assert len(saved_figures) == 1
+
+    ax = saved_figures[0].axes[0]
+    raw_lines = [line for line in ax.lines if len(line.get_xdata()) and line.get_linestyle() == "-"]
+    regression_lines = [line for line in ax.lines if len(line.get_xdata()) and line.get_linestyle() == "--"]
+    assert len(raw_lines) == 2
+    assert len(regression_lines) == 2
+    assert all(line.get_xdata()[0] == pytest.approx(0.0) for line in regression_lines)
+
+
 def test_plot_custom_graphs_selected_sample_individual_skips_missing_marker_sample_with_warning(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

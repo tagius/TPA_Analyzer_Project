@@ -1,109 +1,97 @@
-# Plant-Based TPA Analyzer (TUI)
+# TPA Analyzer
 
-Terminal UI for Double Compression (TPA) analysis of Zwick exports (`.csv` / `.tra`) with grouped statistics, QC reporting, and publication-ready plotting.
+Responsive Textual TUI for Double Compression / Texture Profile Analysis (TPA) of Zwick exports (`.csv` / `.tra`), with grouped statistics, QC reporting, and flexible custom plotting.
 
-## Setup
+## Highlights
 
-1. Install dependencies:
-   - `pip install -r requirements.txt`
-2. Run the app:
-   - `python app.py`
+- Packaged `src/` layout with separated analysis, stats, plotting, config, core, and UI modules
+- Responsive Textual layout for wide, medium, and narrow terminal sizes
+- Unified custom plot builder for trace variables and calculated metrics
+- Multi-select `x` and `y` graph specs with auto expansion per selected `x`
+- All calculated metrics available for plotting and grouped export:
+  - Hardness
+  - Cohesiveness
+  - Springiness
+  - Resilience
+  - Chewiness
+  - Adhesiveness
+  - Modulus
+- Environment-backed runtime defaults
+- Pytest, Ruff, `uv`, and GitHub Actions CI support
 
-## What's New
+## Project Structure
 
-- Robust Zwick parser:
-  - Auto-detects delimiter (comma/semicolon/tab) and header row.
-  - Accepts mixed English/German headers (`Force` / `Standardkraft`, `Deformation` / `Dehnung`, `Time` / `Zeit`).
-- Smarter cycle detection:
-  - Two-peak detection with fallback thresholds/prominence attempts.
-  - Baseline force correction and overlap safeguards between cycle windows.
-- Expanded TPA metrics:
-  - Hardness, Cohesiveness, Springiness, Resilience, Chewiness, Adhesiveness.
-  - True stress/true strain traces and modulus fit within a configurable strain window.
-- Built-in QC package:
-  - Per-file cycle markers, areas, control parameters, and warnings.
-  - Annotated QC figures plus interpretation guide export.
-- Statistics engine upgrades:
-  - `auto`, `parametric`, and `nonparametric` modes.
-  - Auto mode uses Shapiro + Levene checks.
-  - Tests include Welch t-test, Mann-Whitney U, ANOVA + Tukey, and Kruskal-Wallis + Dunn (BH).
-  - Compact-letter group significance display for summaries.
-- Plot Studio:
-  - Custom graph builder (panel/overlay layouts).
-  - Curve modes: individual replicates, mean+band, or both.
-  - Band type: SD or 95% CI.
-  - Group overlays using aligned time.
-  - Figure presets (`1:1`, `4:3`, `16:9`, `A4`) plus custom width/height and DPI.
-- Grouping and style controls:
-  - Auto group inference from filename.
-  - Manual assignment, batch assignment by filename terms, and group order controls.
-  - Stable per-group palette with per-group hex overrides.
-- Session persistence:
-  - Auto-saves working state to `.tpa_analyzer_session.json` in the active data directory.
-  - Restores grouping, parameters, plot specs, and style settings on refresh.
+```text
+src/tpa_analyzer/
+  analysis/    Zwick parsing and TPA calculations
+  config/      env-backed settings and logging
+  core/        constants, models, errors, export/session helpers
+  plotting/    trace, metric, QC, and custom graph rendering
+  stats/       grouped hypothesis testing
+  ui/          Textual app and responsive layout helpers
+tests/         pytest suite
+app.py         thin compatibility entrypoint
+```
 
-## Workflow
+## Development
 
-1. Set a directory containing `.csv` / `.tra` files.
-2. Review inferred groups and adjust manually or in batch.
-3. Tune analysis parameters (trigger, prominence, peak distance, modulus window, etc.).
-4. Run analysis.
-5. Build custom plots if needed.
-6. Export tables, plots, or both.
+Install dependencies with `uv`:
 
-## Exports
+```bash
+uv sync --all-groups
+```
 
-### `Export Tables`
-Creates `exports/<timestamp>/` with:
+Run the app:
+
+```bash
+uv run python app.py
+```
+
+Run tests:
+
+```bash
+uv run pytest
+```
+
+Run Ruff:
+
+```bash
+uv run ruff check .
+```
+
+## Configuration
+
+Environment variables:
+
+- `TPA_ANALYZER_LOG_LEVEL`
+- `TPA_ANALYZER_DEFAULT_DATA_DIR`
+- `TPA_ANALYZER_EXPORT_ROOT`
+- `TPA_ANALYZER_PLOTS_ROOT`
+- `TPA_ANALYZER_SESSION_AUTOSAVE`
+- `TPA_ANALYZER_DEBUG`
+
+## Export Outputs
+
+`Export Tables` writes:
+
 - `tpa_results_summary.csv`
 - `tpa_qc_summary.csv`
 - `tpa_group_stats.csv`
 - `tpa_pairwise_stats.csv`
 
-### `Export Plots`
-Creates `output_plots/<timestamp>/` with:
+`Export Plots` writes:
+
 - `default_stack.png`
-- `grouped_metrics.png` (when stats are available)
-- `overlays/overlay_<group>.png`
-- `custom/custom_<index>_<title>.png`
-- `qc_report/`:
-  - `qc_summary.csv`
-  - `qc_control_parameters.csv`
-  - `qc_markers_and_areas.csv`
-  - `files/*_qc.png`
-  - `QC_REPORT_INTERPRETATION.md`
+- `grouped_metrics.png`
+- `overlays/`
+- `custom/`
+- `qc_report/`
 
-### `Export All`
-Creates `exports/<timestamp>/` with all table exports plus:
-- `plots/default_stack.png`
-- `plots/grouped_metrics.png` (when stats are available)
-- `plots/overlays/overlay_<group>.png`
-- `plots/custom/custom_<index>_<title>.png`
-- `qc_report/*` (same QC package as above)
+`Export All` writes tables plus plots under one timestamped export root.
 
-## Dependencies
+## CI
 
-- `pandas`, `numpy`, `scipy`
-- `matplotlib`, `seaborn`
-- `textual`
-- `pingouin`
+Two GitHub Actions workflows are expected:
 
-## Build macOS + Windows executables (GitHub Actions)
-
-The workflow at `.github/workflows/build-binaries.yml` produces:
-- `tpa-analyzer-macos-app.zip` containing `TPA Analyzer.app` (macOS)
-- `tpa-analyzer.exe` (Windows)
-- Uses platform-specific icons from `assets/`:
-  - `tpa-analyzer-icon.icns` for the macOS app bundle
-  - `tpa-analyzer-icon.ico` for the Windows executable
-
-Steps:
-1. Push this repository to GitHub.
-2. Open **Actions** -> **Build Binaries**.
-3. Click **Run workflow** (or push a tag like `v1.0.0`).
-4. Download artifacts:
-   - `tpa-analyzer-macOS` (contains `tpa-analyzer-macos-app.zip` -> `TPA Analyzer.app`)
-   - `tpa-analyzer-Windows` (contains `tpa-analyzer.exe`)
-
-Troubleshooting:
-- If a binary fails with `ModuleNotFoundError` for `textual.*` modules, rebuild with the current workflow (it includes `--collect-submodules textual --collect-data textual`).
+- `quality.yml` for Ruff, pytest, and packaging smoke checks on pushes and pull requests
+- `build-binaries.yml` for release artifact builds on tags or manual dispatch

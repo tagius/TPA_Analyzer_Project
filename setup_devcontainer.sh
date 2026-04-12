@@ -22,8 +22,8 @@ RUN chown -R vscode:vscode /opt/venv
 # Activate the virtual environment permanently by prepending it to the PATH
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Upgrade pip to the latest version inside the venv
-RUN pip install --upgrade pip
+# Install uv inside the devcontainer
+RUN pip install --upgrade pip uv
 EOF
 echo "✅ Created .devcontainer/Dockerfile"
 
@@ -46,7 +46,7 @@ cat << 'EOF' > .devcontainer/devcontainer.json
       ]
     }
   },
-  "postCreateCommand": "if [ -f requirements.txt ]; then pip install -r requirements.txt; fi",
+  "postCreateCommand": "uv sync --all-groups",
   "remoteUser": "vscode"
 }
 EOF
@@ -65,12 +65,6 @@ else
     else
         echo "⚡ .gitignore already contains venv rules."
     fi
-fi
-
-# 5. Create requirements.txt if it doesn't exist
-if [ ! -f requirements.txt ]; then
-    touch requirements.txt
-    echo "✅ Created empty requirements.txt"
 fi
 
 echo "🎉 Dev Container setup complete!"

@@ -172,6 +172,7 @@ OVERLAY_COMPATIBILITY: Final[dict[str, CompatiblePlotItem]] = {
     "peak1_to_b1_end": _legacy_overlay_item(SEMANTIC_SEGMENTS["peak1_to_b1_end"]),
     "b1_end_to_b2_start": _legacy_overlay_item(SEMANTIC_SEGMENTS["b1_end_to_b2_start"]),
     "b2_start_to_peak2": _legacy_overlay_item(SEMANTIC_SEGMENTS["b2_start_to_peak2"]),
+    "peak2_to_b2_end": _legacy_overlay_item(SEMANTIC_SEGMENTS["peak2_to_b2_end"]),
     "hardness_peak1": _legacy_annotation_item(ANNOTATION_COMPATIBILITY["hardness_peak1"]),
     "adhesiveness": _legacy_annotation_item(ANNOTATION_COMPATIBILITY["adhesiveness"]),
     "modulus_window": _legacy_annotation_item(ANNOTATION_COMPATIBILITY["modulus_window"]),

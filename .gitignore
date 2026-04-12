@@ -1,9 +1,12 @@
 # Ignore save files 
 .tpa_analyzer_session.json
+**/.tpa_analyzer_session.json
 
 # Claude workspace folder
 .claude/
 CLAUDE.md
+docs/
+opencode.json
 
 # System files
 .DS_Store
@@ -26,3 +29,7 @@ __pycache__/
 build/
 dist/
 *.spec
+exports/
+output_plots/
+.pytest_cache/
+.ruff_cache/

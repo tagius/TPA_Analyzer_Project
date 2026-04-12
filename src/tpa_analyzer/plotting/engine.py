@@ -29,6 +29,9 @@ from tpa_analyzer.core.models import (
 from tpa_analyzer.plotting.custom_graphs import ANNOTATION_COMPATIBILITY, OVERLAY_COMPATIBILITY, SEMANTIC_SEGMENTS
 from tpa_analyzer.plotting.registry import VARIABLE_REGISTRY, axis_label, registry_entry
 
+LEFT_AXIS_ACCENT = "#9A3412"
+RIGHT_AXIS_ACCENT = "#1D4ED8"
+
 
 @dataclass(frozen=True)
 class ResolvedGraphJob:
@@ -270,6 +273,14 @@ def validate_composed_graph_spec(spec: CustomGraphSpec) -> None:
 
     left_variables = {layer.variable for layer in spec.left_axis}
     for overlay in effective_overlays:
+        if overlay.kind == "regression":
+            if spec.view_domain != "semantic_segment":
+                raise PlotSpecError("Regression overlays require a semantic segment graph.")
+            if overlay.key not in SEMANTIC_SEGMENTS:
+                raise PlotSpecError(f"Unknown regression segment: {overlay.key}")
+            if overlay.key != (spec.segment_key or ""):
+                raise PlotSpecError("Regression overlay must match the selected semantic segment.")
+            continue
         overlay_meta = OVERLAY_COMPATIBILITY.get(overlay.key)
         if overlay_meta is None:
             raise PlotSpecError(f"Unknown overlay: {overlay.key}")
@@ -435,6 +446,49 @@ def _require_column(frame: pd.DataFrame, label: str) -> str:
     if column not in frame.columns:
         raise PlotSpecError(f"Missing required plot column: {column}")
     return column
+
+
+def _blend_color(color: Any, accent: str, mix: float = 0.45) -> tuple[float, float, float, float]:
+    """Blend one color toward an axis accent while preserving alpha."""
+    rgba = np.array(matplotlib.colors.to_rgba(color), dtype=float)
+    accent_rgba = np.array(matplotlib.colors.to_rgba(accent), dtype=float)
+    blended = rgba.copy()
+    blended[:3] = ((1.0 - mix) * rgba[:3]) + (mix * accent_rgba[:3])
+    return tuple(float(component) for component in blended)
+
+
+def _recolor_axis_artists(ax: Any, accent: str) -> None:
+    """Shift the rendered line/band colors toward one axis accent."""
+    for line in ax.lines:
+        line.set_color(_blend_color(line.get_color(), accent))
+
+    for collection in ax.collections:
+        facecolors = collection.get_facecolors()
+        if len(facecolors):
+            collection.set_facecolors([_blend_color(color, accent) for color in facecolors])
+        edgecolors = collection.get_edgecolors()
+        if len(edgecolors):
+            collection.set_edgecolors([_blend_color(color, accent) for color in edgecolors])
+
+    for patch in ax.patches:
+        facecolor = patch.get_facecolor()
+        if facecolor is not None:
+            patch.set_facecolor(_blend_color(facecolor, accent))
+        edgecolor = patch.get_edgecolor()
+        if edgecolor is not None:
+            patch.set_edgecolor(_blend_color(edgecolor, accent))
+
+
+def _style_trace_axis_side(ax: Any, accent: str, *, recolor_artists: bool) -> None:
+    """Apply one accent to a y-axis and optionally recolor its rendered artists."""
+    if recolor_artists:
+        _recolor_axis_artists(ax, accent)
+    ax.yaxis.label.set_color(accent)
+    ax.tick_params(axis="y", colors=accent)
+    if "left" in ax.spines:
+        ax.spines["left"].set_color(accent)
+    if "right" in ax.spines:
+        ax.spines["right"].set_color(accent)
 
 
 def _units_compatible(labels: list[str]) -> bool:
@@ -862,6 +916,8 @@ def _overlay_required_columns(overlay: CustomGraphOverlay) -> tuple[str, ...]:
         return ("Bite1 End Index", "Bite2 Start Index")
     if overlay.key == "b2_start_to_peak2":
         return ("Bite2 Start Index", "Peak2 Index")
+    if overlay.key == "peak2_to_b2_end":
+        return ("Peak2 Index", "Bite2 End Index")
     if overlay.key == "hardness_peak1":
         return ("Peak1 Index",)
     if overlay.key == "adhesiveness":
@@ -869,6 +925,52 @@ def _overlay_required_columns(overlay: CustomGraphOverlay) -> tuple[str, ...]:
     if overlay.key == "modulus_window":
         return ("Modulus Strain Min (%)", "Modulus Strain Max (%)")
     return ()
+
+
+def _render_segment_regression_overlay(
+    ax: Any,
+    trace_df: pd.DataFrame,
+    x_col: str,
+    y_col: str,
+    overlay: CustomGraphOverlay,
+) -> str | None:
+    """Render one fitted regression line per file over the already-sliced segment view."""
+    segment_meta = SEMANTIC_SEGMENTS.get(overlay.key)
+    overlay_label = (
+        f"{segment_meta.label} regression"
+        if segment_meta is not None
+        else f"{overlay.key} regression"
+    )
+    drawn = False
+
+    for file_key, raw_frame in trace_df.groupby("File", sort=False):
+        frame = raw_frame.sort_values(x_col).reset_index(drop=True)
+        if frame.empty:
+            continue
+        x_vals = frame[x_col].to_numpy(dtype=float)
+        y_vals = frame[y_col].to_numpy(dtype=float)
+        finite_mask = np.isfinite(x_vals) & np.isfinite(y_vals)
+        if int(finite_mask.sum()) < 2:
+            continue
+        x_fit = x_vals[finite_mask]
+        y_fit = y_vals[finite_mask]
+        slope, intercept = np.polyfit(x_fit, y_fit, 1)
+        x_line = np.linspace(float(x_fit.min()), float(x_fit.max()), 48)
+        file_name = _resolve_frame_file_name(file_key, frame)
+        ax.plot(
+            x_line,
+            slope * x_line + intercept,
+            color="#111827",
+            linestyle="--",
+            linewidth=1.2,
+            alpha=0.85,
+            label=f"{file_name} · {overlay_label}",
+        )
+        drawn = True
+
+    if not drawn:
+        return f"overlay '{overlay.key}' skipped: insufficient points for regression."
+    return None
 
 
 def _overlay_qc_file_key(row: pd.Series) -> str:
@@ -1163,6 +1265,9 @@ def _render_composed_overlay(
     overlay: CustomGraphOverlay,
 ) -> str | None:
     """Render a minimal overlay onto the composed figure, or return a warning."""
+    if overlay.kind == "regression":
+        return _render_segment_regression_overlay(ax, trace_df, x_col, y_col, overlay)
+
     qc_columns = {column for row in qc_lookup.values() for column in row.index}
     missing_columns = [column for column in _overlay_required_columns(overlay) if column not in qc_columns]
     if missing_columns:
@@ -1184,7 +1289,7 @@ def _render_composed_overlay(
         x_vals = frame[x_col].to_numpy(dtype=float)
         y_vals = frame[y_col].to_numpy(dtype=float)
 
-        if overlay.key in {"b1_start_to_peak1", "peak1_to_b1_end", "b1_end_to_b2_start", "b2_start_to_peak2"}:
+        if overlay.key in {"b1_start_to_peak1", "peak1_to_b1_end", "b1_end_to_b2_start", "b2_start_to_peak2", "peak2_to_b2_end"}:
             start_column, end_column = _overlay_required_columns(overlay)
             start_idx = _overlay_index(frame, qc_row, start_column)
             end_idx = _overlay_index(frame, qc_row, end_column)
@@ -1363,6 +1468,7 @@ def _render_composed_trace_axis(
             band_mode=job.band_mode,
             group_order=group_order,
         )
+    _style_trace_axis_side(ax_left, LEFT_AXIS_ACCENT, recolor_artists=False)
 
     ax_right = None
     if job.right_layer is not None:
@@ -1380,6 +1486,7 @@ def _render_composed_trace_axis(
         )
         ax_right.set_ylabel(axis_label(job.right_layer.variable))
         ax_right.grid(False)
+        _style_trace_axis_side(ax_right, RIGHT_AXIS_ACCENT, recolor_artists=True)
 
     if job.overlays and job.left_layers:
         overlay_ref_col = _require_column(render_trace_df, job.left_layers[0].variable)
@@ -1458,6 +1565,98 @@ def _render_composed_trace_figure(
     return [str(path)], warnings
 
 
+def _render_selected_sample_overlay_axis(
+    ax_left: Any,
+    prepared_samples: list[tuple[str, pd.DataFrame, pd.Series | None]],
+    job: ResolvedComposedGraphJob,
+    style: PlotStyleConfig,
+) -> tuple[Any | None, list[str]]:
+    """Render explicitly selected samples together on one shared axis."""
+    warnings: list[str] = []
+    sample_names = [sample_name for sample_name, _, _ in prepared_samples]
+    style.ensure_group_colors(sample_names)
+
+    left_styles = ["-", "--"]
+    for layer_index, layer in enumerate(job.left_layers):
+        linestyle = left_styles[layer_index % len(left_styles)]
+        for sample_name, sample_frame, _ in prepared_samples:
+            x_col = _require_column(sample_frame, job.x_label)
+            y_col = _require_column(sample_frame, layer.variable)
+            ordered = sample_frame.sort_values(x_col)
+            label = sample_name if len(job.left_layers) == 1 and job.right_layer is None else f"{sample_name} · {layer.variable}"
+            ax_left.plot(
+                ordered[x_col],
+                ordered[y_col],
+                color=style.get_color(sample_name),
+                linestyle=linestyle,
+                linewidth=style.mean_linewidth,
+                alpha=0.95,
+                label=label,
+            )
+    _style_trace_axis_side(ax_left, LEFT_AXIS_ACCENT, recolor_artists=False)
+
+    ax_right = None
+    if job.right_layer is not None:
+        ax_right = ax_left.twinx()
+        for sample_name, sample_frame, _ in prepared_samples:
+            x_col = _require_column(sample_frame, job.x_label)
+            y_col = _require_column(sample_frame, job.right_layer.variable)
+            ordered = sample_frame.sort_values(x_col)
+            ax_right.plot(
+                ordered[x_col],
+                ordered[y_col],
+                color=style.get_color(sample_name),
+                linestyle=":",
+                linewidth=style.mean_linewidth,
+                alpha=0.95,
+                label=f"{sample_name} · {job.right_layer.variable}",
+            )
+        ax_right.set_ylabel(axis_label(job.right_layer.variable))
+        ax_right.grid(False)
+        _style_trace_axis_side(ax_right, RIGHT_AXIS_ACCENT, recolor_artists=True)
+
+    combined_trace = pd.concat([frame for _, frame, _ in prepared_samples], ignore_index=True)
+    combined_lookup = {
+        sample_name: qc_row
+        for sample_name, _, qc_row in prepared_samples
+        if qc_row is not None
+    }
+    x_col = _require_column(combined_trace, job.x_label)
+
+    if job.overlays and job.left_layers:
+        overlay_ref_col = _require_column(combined_trace, job.left_layers[0].variable)
+        for overlay in job.overlays:
+            overlay_artist_state = _capture_axis_artist_state(ax_left)
+            try:
+                overlay_warning = _render_composed_overlay(
+                    ax_left,
+                    combined_trace,
+                    combined_lookup,
+                    x_col,
+                    overlay_ref_col,
+                    overlay,
+                )
+            except Exception as exc:
+                _restore_axis_artist_state(ax_left, overlay_artist_state)
+                overlay_warning = str(exc) or f"overlay '{overlay.key}' skipped during rendering."
+            if overlay_warning is not None:
+                warnings.append(f"{job.spec_title}: {overlay_warning}")
+
+    if job.annotations and job.left_layers:
+        annotation_ref_col = _require_column(combined_trace, job.left_layers[0].variable)
+        for annotation_warning in _render_composed_annotations(
+            ax_left,
+            combined_trace,
+            combined_lookup,
+            x_col,
+            annotation_ref_col,
+            job.annotations,
+        ):
+            warnings.append(f"{job.spec_title}: {annotation_warning}")
+
+    return ax_right, warnings
+
+
 def _plot_selected_sample_trace_job(
     trace_df: pd.DataFrame,
     qc_lookup: dict[str, pd.Series],
@@ -1473,6 +1672,26 @@ def _plot_selected_sample_trace_job(
     prepared_samples, warnings = _prepare_selected_sample_data(trace_df, qc_lookup, job, x_col)
     if not prepared_samples:
         return [], warnings
+
+    if job.display_mode == "overlay":
+        fig, ax_left = plt.subplots(1, 1, figsize=figure_config.resolve_size())
+        ax_right, render_warnings = _render_selected_sample_overlay_axis(
+            ax_left,
+            prepared_samples,
+            job,
+            style,
+        )
+        warnings.extend(render_warnings)
+        ax_left.set_xlabel(axis_label(job.x_label))
+        ax_left.set_ylabel(" / ".join(axis_label(layer.variable) for layer in job.left_layers))
+        ax_left.set_title(f"{job.spec_title} [{job.x_label}]")
+        ax_left.grid(True, linestyle="--", alpha=0.25)
+        _apply_axis_legend(ax_left, group_order=None, extra_axes=[ax_right] if ax_right is not None else None)
+        fig.tight_layout()
+        path = _allocate_plot_path(output_dir, job.spec_title, job.x_label, allocated_stems)
+        fig.savefig(path, dpi=figure_config.dpi, bbox_inches="tight")
+        plt.close(fig)
+        return [str(path)], warnings
 
     if job.display_mode == "individual":
         saved_paths: list[str] = []

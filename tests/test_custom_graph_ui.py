@@ -3,9 +3,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 from textual.widgets import Checkbox, OptionList, Select
 
 from tpa_analyzer.config.settings import AppSettings
+from tpa_analyzer.core.errors import PlotSpecError
 from tpa_analyzer.core.models import GraphSpec
 from tpa_analyzer.ui.app import TPAAnalyzerApp
 
@@ -28,6 +30,10 @@ def _checkbox_by_label(app: TPAAnalyzerApp, label: str) -> Checkbox:
 
 def _builder_option_prompts(option_list: OptionList) -> list[str]:
     return [str(option.prompt) for option in option_list._options]
+
+
+def _selected_builder_prompts(option_list: OptionList) -> list[str]:
+    return [prompt for prompt in _builder_option_prompts(option_list) if prompt.startswith("* ")]
 
 
 def test_segment_control_disabled_before_analysis(tmp_path: Path) -> None:
@@ -607,7 +613,7 @@ def test_segment_domain_enables_segment_control_and_filters_annotations(tmp_path
     asyncio.run(scenario())
 
 
-def test_selected_samples_scope_uses_dedicated_plot_builder_list(tmp_path: Path) -> None:
+def test_plot_builder_defaults_to_all_samples_overlay_mode(tmp_path: Path) -> None:
     async def scenario() -> None:
         app = _make_app(tmp_path)
 
@@ -655,30 +661,27 @@ def test_selected_samples_scope_uses_dedicated_plot_builder_list(tmp_path: Path)
             )
             await pilot.pause()
 
-            data_scope = app.query_one("#select_custom_data_scope", Select)
             sample_list = app.query_one("#custom_graph_sample_list", OptionList)
-
-            assert data_scope.value == "grouped"
-            assert sample_list.disabled is True
-            assert _builder_option_prompts(sample_list) == ["sample-a.csv", "sample-b.csv"]
-
-            data_scope.value = "selected_samples"
-            await pilot.pause()
+            display_mode = app.query_one("#select_custom_display_mode", Select)
 
             assert sample_list.disabled is False
-
-            sample_list.highlighted = 0
-            sample_list.action_select()
-            await pilot.pause()
+            assert _builder_option_prompts(sample_list) == [
+                "* All samples",
+                "* sample-a.csv",
+                "* sample-b.csv",
+            ]
+            assert _select_values(display_mode) == ["overlay", "individual"]
+            assert str(display_mode.value) == "overlay"
 
             spec = app._collect_graph_spec_from_ui()
             assert spec.data_scope == "selected_samples"
-            assert spec.selected_samples == ["sample-a.csv"]
+            assert spec.selected_samples == ["sample-a.csv", "sample-b.csv"]
+            assert spec.display_mode == "overlay"
 
     asyncio.run(scenario())
 
 
-def test_space_toggles_builder_samples_without_touching_grouping_assignments(tmp_path: Path) -> None:
+def test_space_toggles_builder_samples_with_visible_markers_without_touching_grouping_assignments(tmp_path: Path) -> None:
     async def scenario() -> None:
         app = _make_app(tmp_path)
 
@@ -732,26 +735,133 @@ def test_space_toggles_builder_samples_without_touching_grouping_assignments(tmp
             )
             await pilot.pause()
 
-            data_scope = app.query_one("#select_custom_data_scope", Select)
             sample_list = app.query_one("#custom_graph_sample_list", OptionList)
-            data_scope.value = "selected_samples"
-            await pilot.pause()
 
             sample_list.focus()
             sample_list.highlighted = 0
             await pilot.pause()
             await pilot.press("space")
             await pilot.pause()
+            assert _selected_builder_prompts(sample_list) == []
 
             sample_list.highlighted = 1
             await pilot.pause()
             await pilot.press("space")
             await pilot.pause()
+            assert _selected_builder_prompts(sample_list) == ["* sample-a.csv"]
+
+            sample_list.highlighted = 2
+            await pilot.pause()
+            await pilot.press("space")
+            await pilot.pause()
+            assert _selected_builder_prompts(sample_list) == ["* All samples", "* sample-a.csv", "* sample-b.csv"]
 
             spec = app._collect_graph_spec_from_ui()
             assert spec.selected_samples == ["sample-a.csv", "sample-b.csv"]
             assert [record["group"] for record in app.file_records] == initial_groups
             assert app.selected_file_indices == set()
+
+    asyncio.run(scenario())
+
+
+def test_collect_graph_spec_requires_at_least_one_selected_sample(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        app = _make_app(tmp_path)
+
+        async with app.run_test() as pilot:
+            app._apply_analysis_results(
+                pd.DataFrame([{"Filename": "sample-a.csv", "Group": "Control"}]),
+                pd.DataFrame(
+                    [
+                        {
+                            "File": "sample-a.csv",
+                            "Filename": "sample-a.csv",
+                            "Group": "Control",
+                            "Time (s)": 0.0,
+                            "Aligned Time (s)": 0.0,
+                            "Force (N)": 1.0,
+                            "Force Corrected (N)": 1.0,
+                        }
+                    ]
+                ),
+                pd.DataFrame([{"Filename": "sample-a.csv", "Group": "Control", "Bite1 Start Index": 0, "Peak1 Index": 0}]),
+                {},
+                [],
+                [],
+            )
+            await pilot.pause()
+
+            sample_list = app.query_one("#custom_graph_sample_list", OptionList)
+            sample_list.focus()
+            sample_list.highlighted = 0
+            await pilot.pause()
+            await pilot.press("space")
+            await pilot.pause()
+
+            with pytest.raises(PlotSpecError, match="Select at least one sample"):
+                app._collect_graph_spec_from_ui()
+
+    asyncio.run(scenario())
+
+
+def test_segment_regression_options_follow_selected_segment_and_include_peak2_window(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        app = _make_app(tmp_path)
+
+        async with app.run_test() as pilot:
+            app._apply_analysis_results(
+                pd.DataFrame([{"Filename": "sample.csv", "Group": "Control"}]),
+                pd.DataFrame(
+                    [
+                        {
+                            "File": "sample.csv",
+                            "Filename": "sample.csv",
+                            "Group": "Control",
+                            "Time (s)": 0.0,
+                            "Aligned Time (s)": 0.0,
+                            "Force (N)": 1.0,
+                            "Force Corrected (N)": 1.0,
+                            "Deformation (mm)": 0.1,
+                        }
+                    ]
+                ),
+                pd.DataFrame(
+                    [
+                        {
+                            "Filename": "sample.csv",
+                            "Group": "Control",
+                            "Bite1 Start Index": 0,
+                            "Peak1 Index": 0,
+                            "Bite1 End Index": 0,
+                            "Bite2 Start Index": 0,
+                            "Peak2 Index": 0,
+                            "Bite2 End Index": 0,
+                        }
+                    ]
+                ),
+                {},
+                [],
+                [],
+            )
+            await pilot.pause()
+
+            force_corrected = _checkbox_by_label(app, "Force Corrected (N)")
+            force_corrected.value = True
+            await pilot.pause()
+
+            view_domain = app.query_one("#select_custom_view_domain", Select)
+            segment = app.query_one("#select_custom_segment", Select)
+            regression = app.query_one("#select_custom_regression", Select)
+
+            view_domain.value = "semantic_segment"
+            await pilot.pause()
+
+            assert "peak2_to_b2_end" in _select_values(segment)
+
+            segment.value = "peak2_to_b2_end"
+            await pilot.pause()
+
+            assert _select_values(regression) == ["__none__", "peak2_to_b2_end"]
 
     asyncio.run(scenario())
 
@@ -821,14 +931,35 @@ def test_legacy_graph_specs_render_recipe_style_summary(tmp_path: Path) -> None:
             app._render_graph_specs()
             await pilot.pause()
 
-            summary = str(app.query_one("#graph-spec-list").render())
-            assert "Recipe: trace graph" in summary
-            assert "Anchor domain: Time (s)" in summary
-            assert "Primary axis: Force (N), Deformation (mm)" in summary
-            assert "Secondary axis: None" in summary
-            assert "Legacy trace recipe" not in summary
-            assert "X domain:" not in summary
-            assert "Left axis:" not in summary
-            assert "Right axis:" not in summary
+            graph_list = app.query_one("#graph-spec-list", OptionList)
+            prompts = _builder_option_prompts(graph_list)
+            assert prompts == ["1. Legacy Trace | trace | Time (s)"]
+
+    asyncio.run(scenario())
+
+
+def test_graph_list_supports_deleting_one_saved_custom_graph(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        app = _make_app(tmp_path)
+
+        async with app.run_test() as pilot:
+            app.graph_specs = [
+                GraphSpec(title="First", plot_type="trace", x_cols=["Time (s)"], y_cols=["Force (N)"]),
+                GraphSpec(title="Second", plot_type="trace", x_cols=["Aligned Time (s)"], y_cols=["Force (N)"]),
+            ]
+            app.selected_graph_spec_index = 0
+            app._render_graph_specs()
+            await pilot.pause()
+
+            graph_list = app.query_one("#graph-spec-list", OptionList)
+            graph_list.highlighted = 0
+            await pilot.pause()
+
+            app.query_one("#btn_delete_graph").press()
+            await pilot.pause()
+
+            assert len(app.graph_specs) == 1
+            assert app.graph_specs[0].title == "Second"
+            assert _builder_option_prompts(graph_list) == ["1. Second | trace | Aligned Time (s)"]
 
     asyncio.run(scenario())

@@ -155,7 +155,7 @@ class CustomGraphAxisLayer:
 class CustomGraphOverlay:
     """An auxiliary overlay rendered on top of a custom graph."""
 
-    kind: Literal["segment", "annotation", "inset_bar", "window"]
+    kind: Literal["segment", "annotation", "inset_bar", "window", "regression"]
     key: str
 
 
@@ -181,7 +181,7 @@ class CustomGraphSpec:
     annotations: list[CustomGraphAnnotation] = field(default_factory=list)
     data_scope: Literal["grouped", "selected_samples"] = "grouped"
     selected_samples: list[str] = field(default_factory=list)
-    display_mode: Literal["stacked", "individual"] = "stacked"
+    display_mode: Literal["stacked", "overlay", "individual"] = "overlay"
     enabled: bool = True
     band_mode: TraceBandMode = "sd"
     overlay: CustomGraphOverlay | None = None

@@ -153,6 +153,7 @@ def export_plot_bundle(
     custom_payload = plot_custom_graphs(
         trace_df=trace_df,
         metrics_df=metrics_df,
+        qc_df=qc_df,
         graph_specs=graph_specs,
         style=style,
         output_dir=plot_root / "custom",
